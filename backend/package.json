@@ -61,7 +61,7 @@
     "dompurify": "^3.4.13",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "express-rate-limit": "^8.2.1",
+    "express-rate-limit": "^8.2.2",
     "express-validator": "^7.3.0",
     "ioredis": "^5.8.2",
     "jsdom": "^26.1.0",
