@@ -74,10 +74,10 @@
     "sharp": "^0.35.4",
     "tail": "^2.2.6",
     "unzipper": "^0.12.3",
-    "uuid": "^13.0.0",
+    "uuid": "^14.0.0",
     "web-push": "^3.6.7",
     "winston": "^3.19.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11",
