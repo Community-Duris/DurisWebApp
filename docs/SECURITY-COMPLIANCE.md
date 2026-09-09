@@ -1,7 +1,7 @@
 # Security & Compliance
 
 > Cumulative security posture and GDPR record.
-> **Line budget**: 1000 max | **Last updated**: Phase 00 (2026-09-01)
+> **Line budget**: 1000 max | **Last updated**: 2026-09-09
 
 ---
 
@@ -11,39 +11,19 @@
 
 | Metric | Value |
 |--------|-------|
-| Open Security Findings | 4 named: 1 Critical, 2 High, 1 Low |
+| Open Security Findings | 3 named: 2 High, 1 Low |
 | GDPR Baseline | 9 gaps, 1 partial control |
 | Phases Audited | 1 (Phase 00, 7/7 sessions validated) |
 | Last Clean Phase | None |
 
 Phase 00's scoped changes validated successfully and materially strengthened
-the MUD integration boundary. The project is still at risk because a production
-dependency path has an untriaged critical advisory, two auth/session findings
-remain High, and privacy lifecycle requirements are not implemented.
+the MUD integration boundary. The project is still at risk because two
+auth/session findings remain High and privacy lifecycle requirements are not
+implemented. Dependency audits are currently clean.
 
 ---
 
 ## Open Findings
-
-### Critical
-
-#### SEC-DEP-1: Production dependency advisories are untriaged
-
-- **Introduced/confirmed**: [P00-audit], current audit on 2026-09-01.
-- **Affected packages**: `backend`, `frontend`.
-- **Evidence**: `pnpm audit --prod --json` reports 65 backend advisories (1
-  critical, 27 high, 30 moderate, 7 low) and 64 frontend advisories (20 high,
-  38 moderate, 6 low). The backend critical advisory reaches
-  `fast-xml-parser`; high results include runtime-facing packages such as
-  `express-rate-limit`, `jws`, `multer`, `ws`, and `axios` across the two apps.
-- **Impact**: Raw advisory presence does not prove every vulnerable function is
-  reachable, but production dependency paths are affected and have not been
-  traced or upgraded. The one critical path prevents a clean posture claim.
-- **Remediation**: Export dependency paths, map each critical/high advisory to
-  runtime use, upgrade or replace direct dependencies, record justified
-  non-reachability exceptions, then rerun production and full audits plus the
-  full test/build matrix.
-- **Status**: Open; dedicated dependency-security work required.
 
 ### High
 
@@ -210,20 +190,19 @@ review.
 
 ## Dependency Security
 
-Audit date: 2026-09-01. Counts are raw `pnpm audit` advisory results and may
-include multiple vulnerable paths; they are not a reachability assessment.
+Audit date: 2026-09-09. Counts are raw `pnpm audit` advisory results.
 
 | Package | Scope | Critical | High | Moderate | Low | Total |
 |---------|-------|----------|------|----------|-----|-------|
-| backend | All dependencies | 3 | 58 | 42 | 10 | 113 |
-| backend | Production only | 1 | 27 | 30 | 7 | 65 |
-| frontend | All dependencies | 2 | 62 | 52 | 7 | 123 |
-| frontend | Production only | 0 | 20 | 38 | 6 | 64 |
+| backend | All dependencies | 0 | 0 | 0 | 0 | 0 |
+| backend | Production only | 0 | 0 | 0 | 0 | 0 |
+| frontend | All dependencies | 0 | 0 | 0 | 0 | 0 |
+| frontend | Production only | 0 | 0 | 0 | 0 | 0 |
 
-Notable critical modules in the full graph are `fast-xml-parser`, `handlebars`,
-`tar`, `shell-quote`, and `vitest`; only `fast-xml-parser` remains critical in
-the production-only results. Resolve SEC-DEP-1 with path/reachability triage and
-upgrades, not by suppressing audit output.
+SEC-DEP-1 was resolved by refreshing both dependency graphs to patched releases,
+upgrading Vitest to its fixed major line, explicitly selecting the patched
+Workbox build peer, and removing an unused backend Tiptap dependency. No audit
+finding was suppressed or ignored.
 
 ---
 
@@ -239,6 +218,7 @@ upgrades, not by suppressing audit output.
 | P00-S05 | Flatfile path/content attacks | Centralized boundary rejects escape, unsafe file type, oversized/growing, malformed, and unbounded input. |
 | P00-S05 | Connection log PII emission | IP values are no longer included in connection-sync application logs. |
 | P00-S07 | 1 Medium and 2 Low review findings | Gate-order assertion and handoff/commit evidence were repaired before validation. |
+| 2026-09-09 dependency remediation | SEC-DEP-1 | Backend and frontend full and production-only `pnpm audit` checks report zero advisories. |
 
 ---
 
@@ -252,17 +232,15 @@ upgrades, not by suppressing audit output.
 
 ## Next-Phase Priorities
 
-1. **[P00-security] Triage and remediate SEC-DEP-1**, starting with the
-   production `fast-xml-parser` path and runtime high advisories.
-2. **[P00-security] Decide the SEC-RT-1 rollout**, hash refresh tokens, and
+1. **[P00-security] Decide the SEC-RT-1 rollout**, hash refresh tokens, and
    communicate the one-time global logout.
-3. **[P00-security] Fix SEC-TZ-1** with explicit UTC semantics and a
+2. **[P00-security] Fix SEC-TZ-1** with explicit UTC semantics and a
    timezone-offset regression test.
-4. **[P00-privacy] Assign a privacy owner** for notice/consent, transfer and
+3. **[P00-privacy] Assign a privacy owner** for notice/consent, transfer and
    profiling disclosure, retention schedules, and user export/erasure.
-5. **[P00-infra] Prove production WSS and health probes** after a hosting target
+4. **[P00-infra] Prove production WSS and health probes** after a hosting target
    is selected; do not weaken transport policy to make rollout pass.
-6. **[P00-data] Design the migration baseline and shared-schema ledger repair**
+5. **[P00-data] Design the migration baseline and shared-schema ledger repair**
    as separate backup-first work before claiming clean-room deployability.
 
 ---

@@ -31,16 +31,14 @@ describe('frontend environment configuration', () => {
   })
 
   it('reports all missing public endpoint keys', () => {
-    expect(() => parsePublicFrontendEnvironment({})).toThrow(FrontendConfigurationError)
-    try {
-      parsePublicFrontendEnvironment({})
-    } catch (error) {
-      const message = (error as Error).message
-      expect(message).toContain('VITE_BASE_URL is required')
-      expect(message).toContain('VITE_API_URL is required')
-      expect(message).toContain('VITE_WS_URL is required')
-      expect(message).toContain('VITE_STATIC_URL is required')
-    }
+    expect(() => parsePublicFrontendEnvironment({})).toThrowError(
+      new FrontendConfigurationError([
+        'VITE_BASE_URL is required',
+        'VITE_API_URL is required',
+        'VITE_WS_URL is required',
+        'VITE_STATIC_URL is required',
+      ]),
+    )
   })
 
   it('rejects invalid protocols, ports, and allowed-host entries', () => {
