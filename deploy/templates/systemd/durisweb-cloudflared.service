@@ -8,6 +8,7 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
+@SERVICE_IDENTITY@
 Type=simple
 EnvironmentFile=@DEPLOYMENT_ENV_FILE@
 ExecStart=@CLOUDFLARED_LAUNCHER@
@@ -30,7 +31,7 @@ ProtectKernelTunables=true
 ProtectControlGroups=true
 ProtectProc=invisible
 ProcSubset=pid
-RemoveIPC=true
+RemoveIPC=@SERVICE_REMOVE_IPC@
 RestrictSUIDSGID=true
 RestrictNamespaces=true
 RestrictRealtime=true
@@ -42,4 +43,4 @@ StandardError=journal
 SyslogIdentifier=durisweb-cloudflared
 
 [Install]
-WantedBy=default.target
+WantedBy=@SERVICE_INSTALL_TARGET@

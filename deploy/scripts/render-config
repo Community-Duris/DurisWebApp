@@ -22,6 +22,10 @@ if (( (8#${render_input_mode} & 0177) != 0 )) || [ "${render_input_owner}" != "$
   exit 78
 fi
 
+# Optional selections belong to this input, not the invoking shell environment.
+DEPLOY_SERVICE_SCOPE=user
+SERVICE_USER=''
+NGINX_CANONICAL_ORIGIN=''
 while IFS= read -r render_line || [ -n "${render_line}" ]; do
   case "${render_line}" in
     ''|'#'*) continue ;;
@@ -32,6 +36,29 @@ while IFS= read -r render_line || [ -n "${render_line}" ]; do
   fi
   printf -v "${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
 done <"${render_input}"
+
+SERVICE_IDENTITY=''
+SERVICE_INSTALL_TARGET=default.target
+SERVICE_REMOVE_IPC=true
+case "${DEPLOY_SERVICE_SCOPE}" in
+  user) ;;
+  system)
+    if [[ ! "${SERVICE_USER:-}" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
+      ! render_service_uid=$(id -u "${SERVICE_USER}" 2>/dev/null) ||
+      [ "${render_service_uid}" = '0' ]; then
+      printf 'System services require SERVICE_USER to name an existing non-root user.\n' >&2
+      exit 78
+    fi
+    SERVICE_IDENTITY="User=${SERVICE_USER}"
+    SERVICE_INSTALL_TARGET=multi-user.target
+    # The deployment user may also own the MUD's IPC; do not remove shared IPC.
+    SERVICE_REMOVE_IPC=false
+    ;;
+  *)
+    printf 'DEPLOY_SERVICE_SCOPE must be user or system.\n' >&2
+    exit 78
+    ;;
+esac
 
 render_variables=(
   RENDER_OUTPUT_DIR BACKEND_ROOT FRONTEND_DIST BACKEND_ENV_FILE NODE_BIN TEST_BIN
@@ -62,6 +89,13 @@ if [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
     NGINX_ACME_ROOT NGINX_TLS_CERTIFICATE NGINX_TLS_CERTIFICATE_KEY
     NGINX_TLS_OPTIONS_INCLUDE NGINX_TLS_DHPARAM
   )
+  if [ -n "${NGINX_CANONICAL_ORIGIN:-}" ]; then
+    if [[ ! "${NGINX_CANONICAL_ORIGIN}" =~ ^https://[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$ ]]; then
+      printf 'NGINX_CANONICAL_ORIGIN must be an HTTPS DNS origin without port, path, or trailing slash.\n' >&2
+      exit 78
+    fi
+    render_variables+=(NGINX_CANONICAL_ORIGIN)
+  fi
 fi
 
 if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ] || [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
@@ -103,6 +137,7 @@ for render_service in "${render_services[@]}"; do
 done
 
 render_output_marker="${RENDER_OUTPUT_DIR}/.durisweb-render-output"
+render_variables+=(SERVICE_IDENTITY SERVICE_INSTALL_TARGET SERVICE_REMOVE_IPC)
 if [[ "${RENDER_OUTPUT_DIR}" != /* ]] ||
   [ "$(realpath -m -- "${RENDER_OUTPUT_DIR}")" != "${RENDER_OUTPUT_DIR}" ]; then
   printf 'Render output must be an absolute path without symlinked components: %s\n' \
@@ -184,6 +219,10 @@ if [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
     "${RENDER_OUTPUT_DIR}/nginx/bootstrap.conf"
   render_template "${render_deploy_root}/templates/nginx/production.conf" \
     "${RENDER_OUTPUT_DIR}/nginx/production.conf"
+  if [ -n "${NGINX_CANONICAL_ORIGIN:-}" ]; then
+    render_template "${render_deploy_root}/templates/nginx/canonical-redirect.conf" \
+      "${RENDER_OUTPUT_DIR}/nginx/canonical-redirect.conf"
+  fi
   chmod 0644 "${RENDER_OUTPUT_DIR}"/nginx/*.conf
 fi
 
@@ -195,7 +234,7 @@ render_ingress_service=''
 render_ingress_service_scope=''
 if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ]; then
   render_ingress_service='durisweb-cloudflared.service'
-  render_ingress_service_scope='user'
+  render_ingress_service_scope=${DEPLOY_SERVICE_SCOPE}
 elif [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
   render_ingress_service=${NGINX_SERVICE}
   render_ingress_service_scope='system'
@@ -205,6 +244,7 @@ if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ] || [ "${DEPLOY_NGINX_ENABLED}" =
 fi
 {
   printf 'NODE_BIN=%s\n' "${NODE_BIN}"
+  printf 'DEPLOY_SERVICE_SCOPE=%s\n' "${DEPLOY_SERVICE_SCOPE}"
   printf 'APPLICATION_SERVICE=%s\n' "${APPLICATION_SERVICE}"
   printf 'CACHE_SERVICE=%s\n' "${CACHE_SERVICE}"
   printf 'INGRESS_SERVICE=%s\n' "${render_ingress_service}"

@@ -221,6 +221,26 @@ backend-owned password to a mode-0600 runtime config; the secret never appears
 in `ExecStart`. For user services, enable linger for the selected service
 account and verify `Linger=yes` before enabling units.
 
+`DEPLOY_SERVICE_SCOPE=user` is the default. To use the system manager instead,
+set `DEPLOY_SERVICE_SCOPE=system` and `SERVICE_USER` to an existing non-root
+account. All website units then use that identity and `multi-user.target`;
+the recovery selection records their scope. System mode preserves IPC owned
+by the account on service stop because it may also own the separately managed
+MUD. Both launchers use systemd's private `RUNTIME_DIRECTORY`, which works in
+either scope without relying on a login session's runtime directory.
+
+Some AppArmor hosts implicitly confine user-service namespace setup before
+bubblewrap executes. A profile for bubblewrap alone may not overcome that
+inherited restriction. Validate the exact sandbox flags under the chosen
+manager. System mode can preserve the same unit restrictions while running as
+the unprivileged account; do not disable host-wide user-namespace protection.
+
+The application unit permits the mount, user, IPC, UTS, and cgroup namespaces used
+by its bubblewrap terminal; PID and network namespace creation remain denied.
+On hosts restricting unprivileged user namespaces through AppArmor, install a
+profile for the configured bubblewrap executable that permits `userns`, and
+verify the terminal sandbox under the application unit's restrictions.
+
 The cloudflared launcher validates the deployment file ownership/mode, obtains
 a short-lived tunnel token from the configured account/tunnel, and restricts
 the child environment. It selects token-file handling only for compatible
@@ -264,6 +284,18 @@ Manual invocations of an account-local Redis binary or `redis-cli` may require
 the same `REDIS_LIBRARY_PATH` rendered into the cache unit. A dynamic-loader
 error occurs before network authentication and must not be diagnosed as a bad
 Redis credential.
+
+For system scope, use `systemd-analyze verify` and install root-owned copies of
+the reviewed units under `/etc/systemd/system` instead of linking them into a
+user manager. Run `systemctl daemon-reload`, then start/enable only the selected
+system group. Keep the operator input owned by `SERVICE_USER` for the tunnel
+launcher's ownership check. `recover-deployment` selects `--system` from its
+rendered control file; starting system services requires the corresponding
+operator authority. Read-only `--accept-only` checks can run as the render owner.
+Never leave both managers enabled on the same listener ports. Snapshot the old
+group, stop it completely, start the new group, and re-run acceptance and the
+bridge soak. Switching managers is a coordinated application/cache/tunnel
+restart, not a database or MUD restart.
 
 ## Cutover sequence
 
@@ -344,6 +376,32 @@ verify:
   dependency preflight;
 - recent error-priority logs. Use `journalctl --quiet` in assertions so its
   literal `-- No entries --` banner is not mistaken for an error.
+
+When the frontend uses an absolute canonical API origin, redirect website aliases
+to that origin before serving the SPA. Host-only CSRF cookies cannot be read by
+JavaScript on a different hostname, even when CORS permits both origins. Verify
+login through each public alias, not just the canonical login page. Preserve the
+exact backend health route when an alias is routed through a redirect proxy, and
+record that proxy configuration with the release's ingress recovery artifacts.
+
+For a tunnel alias routed through Nginx, set the optional operator value
+`NGINX_CANONICAL_ORIGIN` to the canonical HTTPS DNS origin (no port, path, or
+trailing slash). The renderer then produces `nginx/canonical-redirect.conf`,
+which preserves ACME and exact `/health` routes and redirects other requests
+with HTTP 308. Install or include this artifact **instead of** the existing
+HTTP vhost for those names; do not install both it and the HTTP server from
+`production.conf` or `bootstrap.conf`. Keep the canonical tunnel hostname routed
+directly to the application to avoid a redirect loop. Blank disables generation;
+if retiring a previously installed redirect, explicitly remove its live include
+and review any previously generated artifact before deploying replacements.
+
+For a Cloudflare-terminated deployment, verify security headers at the edge, not
+only at the origin. Its `security_header` zone setting can supply HSTS and
+`nosniff`. Start with a deliberate HSTS lifetime and leave subdomain inheritance
+and preload disabled unless all affected endpoints have been qualified. Save the
+prior setting and keep certificate-valid HTTPS available throughout the cached
+HSTS lifetime during recovery. See the
+[Cloudflare HSTS requirements](https://developers.cloudflare.com/ssl/edge-certificates/additional-options/http-strict-transport-security/#requirements).
 
 Exercise every enabled, data-backed public surface with its feature-specific
 readiness assertion and a real browser at representative desktop and mobile

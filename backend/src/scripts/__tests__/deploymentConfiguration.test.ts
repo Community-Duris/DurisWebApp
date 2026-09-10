@@ -42,6 +42,66 @@ afterEach(() => {
 });
 
 describe('deployment configuration renderer', () => {
+  it.each([0o700, 0o777])(
+    'uses a private systemd runtime directory for tunnel credentials (mode %s)',
+    (mode) => {
+      const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-tunnel-'));
+      temporaryDirectories.push(temporaryRoot);
+      const runtime = path.join(temporaryRoot, 'runtime');
+      const binaries = path.join(temporaryRoot, 'bin');
+      const input = path.join(temporaryRoot, 'deployment.env');
+      fs.mkdirSync(runtime);
+      fs.chmodSync(runtime, mode);
+      fs.mkdirSync(binaries);
+      fs.writeFileSync(input, '', { mode: 0o600 });
+      const cloudflared = path.join(binaries, 'cloudflared');
+      fs.writeFileSync(
+        cloudflared,
+        `#!/bin/sh
+if [ "$1" = version ]; then echo 'cloudflared version 2026.8.3'; exit 0; fi
+test -z "\${CLOUDFLARE_API_TOKEN:-}" || exit 9
+printf '%s\\n' "$*"
+`,
+        { mode: 0o700 },
+      );
+      fs.writeFileSync(path.join(binaries, 'curl'), '#!/bin/sh\necho stub-response\n', {
+        mode: 0o700,
+      });
+      fs.writeFileSync(path.join(binaries, 'jq'), '#!/bin/sh\ncat >/dev/null\necho stub-token\n', {
+        mode: 0o700,
+      });
+      const result = spawnSync(
+        'bash',
+        [path.join(PROJECT_ROOT, 'deploy/scripts/run-durisweb-cloudflared')],
+        {
+          encoding: 'utf8',
+          env: {
+            PATH: `${binaries}:/usr/bin:/bin`,
+            DEPLOYMENT_ENV_FILE: input,
+            CLOUDFLARED_BIN: cloudflared,
+            CLOUDFLARED_METRICS_ADDRESS: '127.0.0.1:20243',
+            SERVICE_HOME: temporaryRoot,
+            SERVICE_PATH: '/usr/bin:/bin',
+            CLOUDFLARE_API_TOKEN: 'stub-api-key',
+            CLOUDFLARE_ACCOUNT_ID: 'stub-account',
+            CLOUDFLARE_WEB_TUNNEL_ID: 'stub-tunnel',
+            RUNTIME_DIRECTORY: runtime,
+          },
+        },
+      );
+      if (mode === 0o700) {
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain(`--token-file ${runtime}/token`);
+        expect(fs.readFileSync(path.join(runtime, 'token'), 'utf8')).toBe('stub-token');
+        expect(fs.statSync(path.join(runtime, 'token')).mode & 0o777).toBe(0o600);
+      } else {
+        expect(result.status).toBe(78);
+        expect(result.stderr).toContain('owner-only');
+        expect(fs.existsSync(path.join(runtime, 'token'))).toBe(false);
+      }
+    },
+  );
+
   it('renders every maintained artifact without unresolved placeholders', () => {
     const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
     temporaryDirectories.push(temporaryRoot);
@@ -107,6 +167,141 @@ describe('deployment configuration renderer', () => {
       'INGRESS_SERVICE_SCOPE=\n',
     );
     expect(fs.existsSync(path.join(outputPath, 'nginx'))).toBe(false);
+  });
+
+  it('does not inherit optional ingress or service scope from the invoking environment', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
+    temporaryDirectories.push(temporaryRoot);
+    const outputPath = path.join(temporaryRoot, 'rendered');
+    fs.mkdirSync(outputPath);
+    const inputPath = writeDeploymentInput(temporaryRoot, outputPath, true);
+    fs.writeFileSync(
+      inputPath,
+      fs
+        .readFileSync(inputPath, 'utf8')
+        .replace(/^(DEPLOY_SERVICE_SCOPE|SERVICE_USER|NGINX_CANONICAL_ORIGIN)=.*\n/gm, ''),
+    );
+    const result = spawnSync(
+      'bash',
+      [path.join(PROJECT_ROOT, 'deploy/scripts/render-config'), inputPath],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DEPLOY_SERVICE_SCOPE: 'system',
+          SERVICE_USER: 'root',
+          NGINX_CANONICAL_ORIGIN: 'https://unexpected.invalid',
+        },
+      },
+    );
+    expect(result.status).toBe(0);
+    expect(fs.existsSync(path.join(outputPath, 'nginx/canonical-redirect.conf'))).toBe(false);
+    expect(fs.readFileSync(path.join(outputPath, 'deployment-selection.env'), 'utf8')).toContain(
+      'DEPLOY_SERVICE_SCOPE=user\n',
+    );
+  });
+
+  it('renders system-managed units with an unprivileged identity and preserves shared IPC', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
+    temporaryDirectories.push(temporaryRoot);
+    const outputPath = path.join(temporaryRoot, 'rendered');
+    fs.mkdirSync(outputPath);
+    const inputPath = writeDeploymentInput(temporaryRoot, outputPath, true);
+    fs.appendFileSync(inputPath, '\nDEPLOY_SERVICE_SCOPE=system\nSERVICE_USER=nobody\n');
+
+    const result = spawnSync(
+      'bash',
+      [path.join(PROJECT_ROOT, 'deploy/scripts/render-config'), inputPath],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    for (const name of ['production', 'redis', 'cloudflared']) {
+      const unit = fs.readFileSync(
+        path.join(outputPath, `systemd/durisweb-${name}.service`),
+        'utf8',
+      );
+      expect(unit).toContain('User=nobody\n');
+      expect(unit).toContain('WantedBy=multi-user.target\n');
+      expect(unit).toContain('RemoveIPC=false\n');
+      expect(unit).toContain('NoNewPrivileges=true\n');
+      expect(unit).not.toMatch(/@[A-Z][A-Z0-9_]*@/);
+    }
+    const selection = fs.readFileSync(path.join(outputPath, 'deployment-selection.env'), 'utf8');
+    expect(selection).toContain('DEPLOY_SERVICE_SCOPE=system\n');
+    expect(selection).toContain('INGRESS_SERVICE_SCOPE=system\n');
+  });
+
+  it.each(['root', '', '0', 'missing-deploy-test-user', 'nobody;id'])(
+    'rejects unsafe or unavailable system-service identity %s',
+    (user) => {
+      const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
+      temporaryDirectories.push(temporaryRoot);
+      const outputPath = path.join(temporaryRoot, 'rendered');
+      fs.mkdirSync(outputPath);
+      const inputPath = writeDeploymentInput(temporaryRoot, outputPath);
+      fs.appendFileSync(inputPath, `\nDEPLOY_SERVICE_SCOPE=system\nSERVICE_USER=${user}\n`);
+      const result = spawnSync(
+        'bash',
+        [path.join(PROJECT_ROOT, 'deploy/scripts/render-config'), inputPath],
+        { encoding: 'utf8' },
+      );
+      expect(result.status).toBe(78);
+      expect(result.stderr).toContain('existing non-root user');
+      expect(fs.readdirSync(outputPath)).toEqual([]);
+    },
+  );
+
+  it('renders an optional canonical redirect while preserving exact health and ACME routes', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
+    temporaryDirectories.push(temporaryRoot);
+    const outputPath = path.join(temporaryRoot, 'rendered');
+    fs.mkdirSync(outputPath);
+    const inputPath = writeDeploymentInput(temporaryRoot, outputPath, true);
+    fs.appendFileSync(inputPath, '\nNGINX_CANONICAL_ORIGIN=https://www.portable.invalid\n');
+
+    const result = spawnSync(
+      'bash',
+      [path.join(PROJECT_ROOT, 'deploy/scripts/render-config'), inputPath],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    const redirect = fs.readFileSync(
+      path.join(outputPath, 'nginx/canonical-redirect.conf'),
+      'utf8',
+    );
+    expect(redirect).toContain('return 308 https://www.portable.invalid$request_uri;');
+    expect(redirect).toContain('location = /health');
+    expect(redirect).toContain('proxy_pass http://127.0.0.1:8080/health;');
+    expect(redirect).toContain('location /.well-known/acme-challenge/');
+    expect(redirect).not.toMatch(/@[A-Z][A-Z0-9_]*@/);
+  });
+
+  it.each([
+    'http://www.portable.invalid',
+    'https://www.portable.invalid/',
+    'https://www.portable.invalid/path',
+    'https://token@www.portable.invalid',
+    'https://www.portable.invalid;return 200',
+    'https://$host',
+  ])('rejects unsafe canonical redirect origin %s before rendering', (origin) => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
+    temporaryDirectories.push(temporaryRoot);
+    const outputPath = path.join(temporaryRoot, 'rendered');
+    fs.mkdirSync(outputPath);
+    const inputPath = writeDeploymentInput(temporaryRoot, outputPath, true);
+    fs.appendFileSync(inputPath, `\nNGINX_CANONICAL_ORIGIN=${origin}\n`);
+
+    const result = spawnSync(
+      'bash',
+      [path.join(PROJECT_ROOT, 'deploy/scripts/render-config'), inputPath],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(78);
+    expect(result.stderr).toContain('NGINX_CANONICAL_ORIGIN must be an HTTPS DNS origin');
+    expect(fs.readdirSync(outputPath)).toEqual([]);
   });
 
   it('rejects public health URI user-info before writing rendered files', () => {

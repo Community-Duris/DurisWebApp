@@ -6,6 +6,7 @@ Before=@APPLICATION_SERVICE@
 StartLimitIntervalSec=0
 
 [Service]
+@SERVICE_IDENTITY@
 Type=simple
 EnvironmentFile=@BACKEND_ENV_FILE@
 Environment=LD_LIBRARY_PATH=@REDIS_LIBRARY_PATH@
@@ -28,7 +29,7 @@ ProtectKernelTunables=true
 ProtectControlGroups=true
 ProtectProc=invisible
 ProcSubset=pid
-RemoveIPC=true
+RemoveIPC=@SERVICE_REMOVE_IPC@
 RestrictSUIDSGID=true
 RestrictNamespaces=true
 RestrictRealtime=true
@@ -40,4 +41,4 @@ StandardError=journal
 SyslogIdentifier=durisweb-redis
 
 [Install]
-WantedBy=default.target
+WantedBy=@SERVICE_INSTALL_TARGET@

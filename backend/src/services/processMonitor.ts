@@ -1,10 +1,12 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs/promises';
-import os from 'os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { getBackendConfiguration } from '../config/environment.js';
 import logger from '../utils/logger.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface ProcessStats {
   cpu: number; // CPU usage percentage
@@ -24,12 +26,43 @@ const numCpus = os.cpus().length;
  */
 export async function getDmsProcessStats(): Promise<ProcessStats> {
   try {
-    // Find the DMS process
-    const { stdout } = await execAsync(
-      "ps aux | grep './dms' | grep -v grep | awk '{print $2, $4, $6}'",
+    // Match the executable, not relative command-line spelling. Process-control
+    // callers must never receive a DMS PID belonging to another checkout.
+    const mudDirectory = await fs.realpath(getBackendConfiguration().mud.directory);
+    const expectedExecutables = new Set([
+      path.join(mudDirectory, 'bin/server/dms'),
+      path.join(mudDirectory, 'dms'),
+    ]);
+    const { stdout } = await execFileAsync('ps', ['-C', 'dms', '-o', 'pid=,%mem=,rss=']).catch(
+      (error: unknown) => {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 1) {
+          return { stdout: '' };
+        }
+        throw error;
+      },
     );
+    const matches: number[][] = [];
+    for (const line of stdout.trim().split('\n')) {
+      const values = line.trim().split(/\s+/).map(Number);
+      if (
+        values.length !== 3 ||
+        !values.every(Number.isFinite) ||
+        !Number.isSafeInteger(values[0]) ||
+        values[0] <= 0
+      )
+        continue;
+      try {
+        const executable = (await fs.readlink(`/proc/${values[0]}/exe`)).replace(
+          / \(deleted\)$/,
+          '',
+        );
+        if (expectedExecutables.has(executable)) matches.push(values);
+      } catch {
+        // A process can exit between the process list and executable lookup.
+      }
+    }
 
-    if (!stdout.trim()) {
+    if (matches.length !== 1) {
       return {
         cpu: 0,
         memory: 0,
@@ -40,10 +73,7 @@ export async function getDmsProcessStats(): Promise<ProcessStats> {
       };
     }
 
-    const parts = stdout.trim().split(/\s+/);
-    const pid = parseInt(parts[0], 10);
-    const memoryPercent = parseFloat(parts[1]);
-    const rss = parseInt(parts[2], 10); // RSS in KB
+    const [pid, memoryPercent, rss] = matches[0]; // RSS in KB
     const memoryMiB = rss / 1024; // Convert to MiB
 
     // Get real-time CPU usage from /proc/[pid]/stat
@@ -84,7 +114,7 @@ export async function getDmsProcessStats(): Promise<ProcessStats> {
     // Get process uptime using ps -p PID -o etimes
     let uptime = 0;
     try {
-      const { stdout: uptimeOut } = await execAsync(`ps -p ${pid} -o etimes= | tr -d ' '`);
+      const { stdout: uptimeOut } = await execFileAsync('ps', ['-p', String(pid), '-o', 'etimes=']);
       uptime = parseInt(uptimeOut.trim(), 10);
     } catch {
       // If we can't get uptime, just use 0

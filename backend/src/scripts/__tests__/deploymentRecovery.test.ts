@@ -30,7 +30,10 @@ interface RecoveryOptions {
 }
 
 /** Renders one isolated deployment and installs deterministic systemctl/curl doubles. */
-function createRecoveryFixture(ingressMode: IngressMode): RecoveryFixture {
+function createRecoveryFixture(
+  ingressMode: IngressMode,
+  scope: 'user' | 'system' = 'user',
+): RecoveryFixture {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-recovery-'));
   temporaryDirectories.push(root);
   const output = path.join(root, 'rendered');
@@ -49,6 +52,9 @@ function createRecoveryFixture(ingressMode: IngressMode): RecoveryFixture {
       'DEPLOYMENT_ENV_FILE=/etc/portable-durisweb/deployment.env',
       `DEPLOYMENT_ENV_FILE=${input}`,
     );
+  environment = environment
+    .replace('DEPLOY_SERVICE_SCOPE=user', `DEPLOY_SERVICE_SCOPE=${scope}`)
+    .replace('SERVICE_USER=', 'SERVICE_USER=nobody');
   if (ingressMode === 'cloudflared') {
     environment = environment
       .replaceAll('replace_with', 'configured')
@@ -149,6 +155,45 @@ afterEach(() => {
 });
 
 describe('complete deployment recovery', () => {
+  it('starts and accepts the complete system-managed group without invoking the user manager', () => {
+    const fixture = createRecoveryFixture('cloudflared', 'system');
+    const result = runRecovery(fixture);
+    expect(result.status).toBe(0);
+    const calls = readRecoveryLog(fixture);
+    expect(calls).toContain(
+      'systemctl --system start durisweb-redis.service durisweb-production.service durisweb-cloudflared.service',
+    );
+    expect(calls).not.toContain('systemctl --user');
+    expect(calls).toContain('systemctl --system show durisweb-production.service');
+    expect(result.stdout).toMatch(/3 units, 2 health probes/);
+  });
+
+  it('rejects invalid deployment scopes before starting units', () => {
+    const fixture = createRecoveryFixture('none');
+    const selection = path.join(fixture.output, 'deployment-selection.env');
+    fs.writeFileSync(
+      selection,
+      fs
+        .readFileSync(selection, 'utf8')
+        .replace('DEPLOY_SERVICE_SCOPE=user', 'DEPLOY_SERVICE_SCOPE=bad'),
+    );
+    const result = runRecovery(fixture);
+    expect(result.status).toBe(78);
+    expect(readRecoveryLog(fixture)).toBe('');
+  });
+
+  it('accepts older selections without an explicit service scope as user-managed', () => {
+    const fixture = createRecoveryFixture('none');
+    const selection = path.join(fixture.output, 'deployment-selection.env');
+    fs.writeFileSync(
+      selection,
+      fs.readFileSync(selection, 'utf8').replace(/^DEPLOY_SERVICE_SCOPE=.*\n/m, ''),
+    );
+    const result = runRecovery(fixture);
+    expect(result.status).toBe(0);
+    expect(readRecoveryLog(fixture)).toContain('systemctl --user start');
+  });
+
   it('accepts keyed systemd properties in manager output order', () => {
     const fixture = createRecoveryFixture('none');
 

@@ -1151,8 +1151,8 @@ function getTypeColor(type: string): string {
       </TabsContent>
 
       <!-- Terminal Tab (Requires terminal_access permission) -->
-      <TabsContent v-if="hasTerminalAccess" value="terminal" class="h-[700px]">
-        <Card class="h-full">
+      <TabsContent v-if="hasTerminalAccess" value="terminal" class="h-[700px] min-h-0 flex-none">
+        <Card class="h-full min-h-0">
           <CardHeader class="pb-2">
             <div class="flex items-center justify-between">
               <div>
@@ -1169,7 +1169,7 @@ function getTypeColor(type: string): string {
               </Badge>
             </div>
           </CardHeader>
-          <CardContent class="p-0 h-[calc(100%-80px)]">
+          <CardContent class="min-h-0 flex-1 p-0">
             <WebTerminal />
           </CardContent>
         </Card>

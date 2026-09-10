@@ -35,6 +35,8 @@ for recovery_file in "${recovery_marker}" "${recovery_selection}"; do
 done
 
 declare -A recovery_seen=()
+# Older selections predate scope support and select user services.
+DEPLOY_SERVICE_SCOPE=user
 while IFS= read -r recovery_line || [ -n "${recovery_line}" ]; do
   if [[ ! "${recovery_line}" =~ ^([A-Z][A-Z0-9_]*)=(.*)$ ]]; then
     printf 'Invalid rendered deployment selection line.\n' >&2
@@ -43,7 +45,7 @@ while IFS= read -r recovery_line || [ -n "${recovery_line}" ]; do
   recovery_key=${BASH_REMATCH[1]}
   recovery_value=${BASH_REMATCH[2]}
   case "${recovery_key}" in
-    NODE_BIN|APPLICATION_SERVICE|CACHE_SERVICE|INGRESS_SERVICE|INGRESS_SERVICE_SCOPE|LOCAL_HEALTH_URL|PUBLIC_HEALTH_URL) ;;
+    NODE_BIN|DEPLOY_SERVICE_SCOPE|APPLICATION_SERVICE|CACHE_SERVICE|INGRESS_SERVICE|INGRESS_SERVICE_SCOPE|LOCAL_HEALTH_URL|PUBLIC_HEALTH_URL) ;;
     *)
       printf 'Unexpected rendered deployment selection key: %s\n' "${recovery_key}" >&2
       exit 78
@@ -117,9 +119,17 @@ if ! command -v systemctl >/dev/null || ! command -v curl >/dev/null; then
 fi
 
 recovery_units=("${CACHE_SERVICE}" "${APPLICATION_SERVICE}")
-recovery_unit_scopes=(user user)
-recovery_user_units=("${CACHE_SERVICE}" "${APPLICATION_SERVICE}")
+recovery_unit_scopes=("${DEPLOY_SERVICE_SCOPE}" "${DEPLOY_SERVICE_SCOPE}")
+recovery_user_units=()
 recovery_system_units=()
+case "${DEPLOY_SERVICE_SCOPE}" in
+  user) recovery_user_units+=("${recovery_units[@]}") ;;
+  system) recovery_system_units+=("${recovery_units[@]}") ;;
+  *)
+    printf 'Invalid rendered deployment service scope.\n' >&2
+    exit 78
+    ;;
+esac
 case "${INGRESS_SERVICE_SCOPE}" in
   user)
     recovery_units+=("${INGRESS_SERVICE}")
@@ -134,13 +144,14 @@ case "${INGRESS_SERVICE_SCOPE}" in
 esac
 
 if [ "${recovery_mode}" = 'recover' ]; then
-  if ! systemctl --user start "${recovery_user_units[@]}"; then
+  if [ "${#recovery_user_units[@]}" -gt 0 ] &&
+    ! systemctl --user start "${recovery_user_units[@]}"; then
     printf 'Failed to start the rendered user-service group.\n' >&2
     exit 1
   fi
   if [ "${#recovery_system_units[@]}" -gt 0 ] &&
     ! systemctl --system start "${recovery_system_units[@]}"; then
-    printf 'Failed to start the rendered system-service ingress.\n' >&2
+    printf 'Failed to start the rendered system-service group.\n' >&2
     exit 1
   fi
 fi

@@ -9,7 +9,7 @@ set -euo pipefail
 : "${CLOUDFLARE_API_TOKEN:?Cloudflare API token is required}"
 : "${CLOUDFLARE_ACCOUNT_ID:?Cloudflare account ID is required}"
 : "${CLOUDFLARE_WEB_TUNNEL_ID:?Cloudflare website tunnel ID is required}"
-: "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
+: "${RUNTIME_DIRECTORY:?RUNTIME_DIRECTORY is required}"
 
 cloudflared_bin=${CLOUDFLARED_BIN}
 cloudflared_version_output="$("${cloudflared_bin}" version)"
@@ -40,9 +40,14 @@ if (( (8#$env_mode & 0177) != 0 )) || [[ "$env_owner" != "$(id -u)" ]]; then
   exit 78
 fi
 
-runtime_dir="${XDG_RUNTIME_DIR}/durisweb-cloudflared"
+runtime_dir=${RUNTIME_DIRECTORY}
+if [[ "${runtime_dir}" != /* || -L "${runtime_dir}" || ! -d "${runtime_dir}" ]] ||
+  [[ "$(stat -c '%u' "${runtime_dir}")" != "$(id -u)" ]] ||
+  (( (8#$(stat -c '%a' "${runtime_dir}") & 0077) != 0 )); then
+  echo 'Runtime directory must be an owner-only, non-symlink directory' >&2
+  exit 78
+fi
 token_file="${runtime_dir}/token"
-install -d -m 0700 "$runtime_dir"
 
 token_response="$({
   curl -fsS --connect-timeout 10 --max-time 30 \
