@@ -1,10 +1,12 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs/promises';
-import os from 'os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { getBackendConfiguration } from '../config/environment.js';
 import logger from '../utils/logger.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface ProcessStats {
   cpu: number; // CPU usage percentage
@@ -24,26 +26,54 @@ const numCpus = os.cpus().length;
  */
 export async function getDmsProcessStats(): Promise<ProcessStats> {
   try {
-    // Find the DMS process
-    const { stdout } = await execAsync(
-      "ps aux | grep './dms' | grep -v grep | awk '{print $2, $4, $6}'",
-    );
-
-    if (!stdout.trim()) {
-      return {
-        cpu: 0,
-        memory: 0,
-        memoryPercent: 0,
-        uptime: 0,
-        pid: null,
-        isRunning: false,
-      };
+    // Read uptime in the same snapshot as the PID. A second ps call can race
+    // process exit and return empty output, which previously became NaN.
+    const { stdout } = await execFileAsync('ps', ['-eo', 'pid=,pmem=,rss=,etimes=,comm='], {
+      env: { ...process.env, LC_ALL: 'C' },
+    });
+    const mudRoot = await fs.realpath(getBackendConfiguration().mud.directory);
+    const binaries = new Set([
+      ...['dms', 'dms_new'].map((name) => path.join(mudRoot, 'bin/server', name)),
+      path.join(mudRoot, 'dms'),
+    ]);
+    const candidates: { pid: number; memoryPercent: number; rss: number; uptime: number }[] = [];
+    for (const line of stdout.trim().split('\n')) {
+      const fields = line.trim().split(/\s+/);
+      if (fields.length !== 5 || !['dms', 'dms_new'].includes(fields[4])) continue;
+      const [pid, memoryPercent, rss, uptime] = fields.slice(0, 4).map(Number);
+      if (
+        !Number.isSafeInteger(pid) ||
+        pid <= 0 ||
+        !Number.isFinite(memoryPercent) ||
+        memoryPercent < 0 ||
+        !Number.isSafeInteger(rss) ||
+        rss < 0 ||
+        !Number.isSafeInteger(uptime) ||
+        uptime < 0 ||
+        !Number.isFinite(new Date(Date.now() - uptime * 1000).getTime())
+      )
+        continue;
+      try {
+        const [cwd, executable] = await Promise.all([
+          fs.readlink(`/proc/${pid}/cwd`),
+          fs.readlink(`/proc/${pid}/exe`),
+        ]);
+        // Other checkouts and regression fixtures are not the managed MUD.
+        if (cwd === mudRoot && binaries.has(executable.replace(/ \(deleted\)$/, ''))) {
+          candidates.push({ pid, memoryPercent, rss, uptime });
+        }
+      } catch {
+        // Processes can exit between the ps snapshot and the identity reads.
+        continue;
+      }
     }
-
-    const parts = stdout.trim().split(/\s+/);
-    const pid = parseInt(parts[0], 10);
-    const memoryPercent = parseFloat(parts[1]);
-    const rss = parseInt(parts[2], 10); // RSS in KB
+    if (candidates.length !== 1) {
+      lastCpuStats = null;
+      if (candidates.length > 1)
+        logger.warn('Multiple DMS processes match the configured checkout');
+      return { cpu: 0, memory: 0, memoryPercent: 0, uptime: 0, pid: null, isRunning: false };
+    }
+    const { pid, memoryPercent, rss, uptime } = candidates[0];
     const memoryMiB = rss / 1024; // Convert to MiB
 
     // Get real-time CPU usage from /proc/[pid]/stat
@@ -56,7 +86,7 @@ export async function getDmsProcessStats(): Promise<ProcessStats> {
       const totalTime = utime + stime;
 
       // Calculate CPU percentage if we have previous stats
-      if (lastCpuStats && lastCpuStats.pid === pid) {
+      if (Number.isFinite(totalTime) && lastCpuStats && lastCpuStats.pid === pid) {
         const timeDiffMs = Date.now() - lastCpuStats.timestamp;
         const cpuTimeDiff = totalTime - (lastCpuStats.utime + lastCpuStats.stime);
 
@@ -70,24 +100,19 @@ export async function getDmsProcessStats(): Promise<ProcessStats> {
         // cpu_seconds = ticks / ticks_per_second
         // cpu_percent_per_core = (cpu_seconds / elapsed_seconds) * 100
         // cpu_percent_total = cpu_percent_per_core / num_cpus
-        cpu = ((cpuTimeDiff / clockTicks / timeDiffSec) * 100) / numCpus;
+        if (timeDiffSec > 0 && cpuTimeDiff >= 0) {
+          cpu = ((cpuTimeDiff / clockTicks / timeDiffSec) * 100) / numCpus;
+        }
         cpu = Math.max(0, Math.min(100, cpu)); // Clamp between 0 and 100
       }
 
       // Update cache
-      lastCpuStats = { pid, utime, stime, timestamp: Date.now() };
+      lastCpuStats = Number.isFinite(totalTime)
+        ? { pid, utime, stime, timestamp: Date.now() }
+        : null;
     } catch {
       // If we can't read /proc, fall back to 0
       cpu = 0;
-    }
-
-    // Get process uptime using ps -p PID -o etimes
-    let uptime = 0;
-    try {
-      const { stdout: uptimeOut } = await execAsync(`ps -p ${pid} -o etimes= | tr -d ' '`);
-      uptime = parseInt(uptimeOut.trim(), 10);
-    } catch {
-      // If we can't get uptime, just use 0
     }
 
     return {

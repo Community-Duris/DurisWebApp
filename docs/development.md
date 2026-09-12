@@ -78,3 +78,13 @@ boundaries; update them only when the new structure preserves the policy.
 Do not commit `.env` files, dumps, account data, generated deployment output,
 or backup archives. See [Configuration and Environments](environments.md) before
 adding any new setting.
+
+## Local MUD process monitoring
+
+Process monitoring selects one `dms` or `dms_new` process whose working directory
+is the canonical `MUD_DIR` and whose executable is under its `bin/server/`
+(or its supported legacy `dms` path).
+Regression fixtures and other checkouts are excluded. Missing, malformed, exited,
+or ambiguous candidates report stopped. Uptime comes from the same process
+snapshot as the PID, so process exit cannot turn an empty second lookup into an
+invalid boot timestamp during WebSocket reconnection.
