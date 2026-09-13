@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChatPresentation from './ChatPresentation.vue'
 import { ref, computed, watch, nextTick } from 'vue'
 import { useMudStore } from '@/stores/mudStore'
 import { parseAnsiToHtml, stripAnsiCodes } from '@/utils/ansiParser'
@@ -75,6 +76,7 @@ type ChatMessageWithChannel = {
   text: string
   channel: string
   alignment?: string
+  presentation?: unknown
 }
 
 // Get current channel messages
@@ -371,6 +373,8 @@ const openDirectChat = (senderName: string) => {
         <span v-if="activeTab === 'all'" :class="getSenderColor(message.channel, message.alignment)" class="shrink-0">
           ({{ getChannelPrefix(message.channel, message.alignment) }})
         </span>
+        <ChatPresentation :presentation="message.presentation" :channel="message.channel"
+          :sender="stripAnsiCodes(message.sender)" @activate="openDirectChat(message.sender)">
         <span
           :class="getSenderColor(message.channel, message.alignment)"
           class="shrink-0 underline decoration-dotted cursor-pointer hover:decoration-solid"
@@ -379,6 +383,7 @@ const openDirectChat = (senderName: string) => {
         />
         <span class="text-muted-foreground">:</span>
         <span class="text-foreground/90" v-html="parseAnsiToHtml(message.text)" />
+        </ChatPresentation>
       </div>
     </div>
 

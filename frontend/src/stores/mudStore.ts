@@ -1,3 +1,4 @@
+import { parseChatPresentation } from '../utils/chatPresentation.js'
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import type {
@@ -453,8 +454,10 @@ export const useMudStore = defineStore('mud', () => {
     text: string,
     highlightClass?: string,
     alignment?: 'good' | 'evil' | 'undead' | 'neutral',
+    presentation?: unknown,
   ) {
     const message: MudChatMessage = {
+      presentation: parseChatPresentation(presentation, channel),
       id: ++chatIdCounter,
       timestamp: new Date(),
       channel,

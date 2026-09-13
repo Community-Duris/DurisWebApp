@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChatPresentation from './ChatPresentation.vue'
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useMudStore } from '@/stores/mudStore'
 import { useMudConnection } from '@/composables/useMudConnection'
@@ -37,7 +38,11 @@ const activeTab = ref<'tell' | 'ptell'>('tell')
 
 // message input
 const message = ref('')
-const inputRef = ref<HTMLInputElement | null>(null)
+const inputRef = ref<InstanceType<typeof Input> | null>(null)
+const focusInput = () => {
+  const element: unknown = inputRef.value?.$el
+  if (element instanceof HTMLInputElement) element.focus()
+}
 
 // scroll container ref
 const messagesRef = ref<HTMLElement | null>(null)
@@ -122,7 +127,7 @@ const sendMessage = () => {
 
   // focus back on input and scroll to bottom
   nextTick(() => {
-    inputRef.value?.focus()
+    focusInput()
     scrollToBottom()
   })
 }
@@ -149,7 +154,7 @@ onMounted(() => {
   if (!props.isMinimized) {
     nextTick(() => {
       scrollToBottom()
-      inputRef.value?.focus()
+      focusInput()
     })
   }
 })
@@ -160,7 +165,7 @@ watch(
   (minimized) => {
     if (!minimized) {
       nextTick(() => {
-        inputRef.value?.focus()
+        focusInput()
         scrollToBottom()
       })
     }
@@ -273,7 +278,7 @@ const formatTime = (timestamp: number): string => {
                     ]
               ]"
             >
-              <p :class="msg.direction === 'sent' ? 'text-white' : 'text-foreground/90'">{{ msg.text }}</p>
+              <p :class="msg.direction === 'sent' ? 'text-white' : 'text-foreground/90'"><ChatPresentation :presentation="msg.presentation" :channel="msg.type">{{ msg.text }}</ChatPresentation></p>
             </div>
             <!-- timestamp -->
             <span class="text-[9px] text-muted-foreground/50 mt-0.5 px-1">
