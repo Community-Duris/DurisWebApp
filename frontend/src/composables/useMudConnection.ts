@@ -1,3 +1,4 @@
+import { validChatContent } from '../utils/chatPresentation.js'
 import { ref, onUnmounted } from 'vue'
 import { useMudStore } from '@/stores/mudStore'
 import { useTriggers } from '@/composables/useTriggers'
@@ -698,6 +699,7 @@ export function useMudConnection() {
         }
         break
       case 'Comm.Channel': {
+        if (!validChatContent(message.data)) break
         // Process chat through triggers
         const { processLine, playSounds } = useTriggers()
         const chatText = `[${message.data.channel}] ${message.data.sender}: ${message.data.text}`
@@ -711,6 +713,7 @@ export function useMudConnection() {
             message.data.text,
             result.highlightClass,
             message.data.alignment,
+            message.data.presentation,
           )
         }
 

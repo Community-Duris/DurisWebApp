@@ -1,0 +1,325 @@
+[{
+		"case":	"selected",
+		"recipient":	"Bob",
+		"terminalMarkup":	"Alice&+r says 'translated &+gforest&+r &&+r&&+r <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"say",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	11,
+				"channel":	"chat.say",
+				"policy":	"static",
+				"text":	"Alice says 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 5, 0, 0], [5, 23, 20, 0], [23, 29, 18, 0], [29, 41, 20, 0]]
+			}
+		}
+	}, {
+		"case":	"selected",
+		"recipient":	"Alice",
+		"terminalMarkup":	"&+CYou say 'SECRET &+gforest&+C &&+C&&+C <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"say",
+			"sender":	"Alice",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	11,
+				"channel":	"chat.say",
+				"policy":	"static",
+				"text":	"You say 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 16, 27, 0], [16, 22, 18, 0], [22, 34, 27, 0]]
+			}
+		}
+	}, {
+		"case":	"reconnect",
+		"recipient":	"Bob",
+		"terminalMarkup":	"Alice&+r says 'translated &+gforest&+r &&+r&&+r <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"say",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	11,
+				"channel":	"chat.say",
+				"policy":	"static",
+				"text":	"Alice says 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 5, 0, 0], [5, 23, 20, 0], [23, 29, 18, 0], [29, 41, 20, 0]]
+			}
+		}
+	}, {
+		"case":	"reconnect",
+		"recipient":	"Alice",
+		"terminalMarkup":	"&+CYou say 'SECRET &+gforest&+C &&+C&&+C <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"say",
+			"sender":	"Alice",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	11,
+				"channel":	"chat.say",
+				"policy":	"static",
+				"text":	"You say 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 16, 27, 0], [16, 22, 18, 0], [22, 34, 27, 0]]
+			}
+		}
+	}, {
+		"case":	"reset",
+		"recipient":	"Bob",
+		"terminalMarkup":	"Alice says 'translated &+gforest&n && <tag> 🌲'\n\r",
+		"packet":	{
+			"channel":	"say",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	11,
+				"channel":	"chat.say",
+				"policy":	"preserve",
+				"text":	"Alice says 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 23, 0, 0], [23, 29, 18, 0], [29, 41, 0, 0]]
+			}
+		}
+	}, {
+		"case":	"reset",
+		"recipient":	"Alice",
+		"terminalMarkup":	"You say 'SECRET &+gforest&n && <tag> 🌲'\r\n",
+		"packet":	{
+			"channel":	"say",
+			"sender":	"Alice",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	11,
+				"channel":	"chat.say",
+				"policy":	"preserve",
+				"text":	"You say 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 16, 0, 0], [16, 22, 18, 0], [22, 34, 0, 0]]
+			}
+		}
+	}, {
+		"case":	"selected",
+		"recipient":	"Alice",
+		"terminalMarkup":	"&+CYou tell &nBob&+C 'SECRET &+gforest&+C &&+C&&+C <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"tell",
+			"sender":	"You -> Bob",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	12,
+				"channel":	"chat.tell",
+				"policy":	"static",
+				"text":	"You tell Bob 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 9, 27, 0], [9, 12, 0, 0], [12, 21, 27, 0], [21, 27, 18, 0], [27, 39, 27, 0]]
+			}
+		}
+	}, {
+		"case":	"selected",
+		"recipient":	"Bob",
+		"terminalMarkup":	"Alice&+r tells you 'translated &+gforest&+r &&+r&&+r <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"tell",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	12,
+				"channel":	"chat.tell",
+				"policy":	"static",
+				"text":	"Alice tells you 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 5, 0, 0], [5, 28, 20, 0], [28, 34, 18, 0], [34, 46, 20, 0]]
+			}
+		}
+	}, {
+		"case":	"reconnect",
+		"recipient":	"Alice",
+		"terminalMarkup":	"&+CYou tell &nBob&+C 'SECRET &+gforest&+C &&+C&&+C <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"tell",
+			"sender":	"You -> Bob",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	12,
+				"channel":	"chat.tell",
+				"policy":	"static",
+				"text":	"You tell Bob 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 9, 27, 0], [9, 12, 0, 0], [12, 21, 27, 0], [21, 27, 18, 0], [27, 39, 27, 0]]
+			}
+		}
+	}, {
+		"case":	"reconnect",
+		"recipient":	"Bob",
+		"terminalMarkup":	"Alice&+r tells you 'translated &+gforest&+r &&+r&&+r <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"tell",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	12,
+				"channel":	"chat.tell",
+				"policy":	"static",
+				"text":	"Alice tells you 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 5, 0, 0], [5, 28, 20, 0], [28, 34, 18, 0], [34, 46, 20, 0]]
+			}
+		}
+	}, {
+		"case":	"reset",
+		"recipient":	"Alice",
+		"terminalMarkup":	"&+WYou tell Bob 'SECRET &+gforest&n && <tag> 🌲'\r\n",
+		"packet":	{
+			"channel":	"tell",
+			"sender":	"You -> Bob",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	12,
+				"channel":	"chat.tell",
+				"policy":	"preserve",
+				"text":	"You tell Bob 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 21, 31, 0], [21, 27, 18, 0], [27, 39, 0, 0]]
+			}
+		}
+	}, {
+		"case":	"reset",
+		"recipient":	"Bob",
+		"terminalMarkup":	"&+WAlice&+W tells you 'translated &+gforest&n && <tag> 🌲'&N\r\n",
+		"packet":	{
+			"channel":	"tell",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	12,
+				"channel":	"chat.tell",
+				"policy":	"preserve",
+				"text":	"Alice tells you 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 28, 31, 0], [28, 34, 18, 0], [34, 46, 0, 0]]
+			}
+		}
+	}, {
+		"case":	"selected",
+		"recipient":	"Alice",
+		"terminalMarkup":	"&+CYou tell your &+cguild&+C 'SECRET &+gforest&+C &&+C&&+C <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"gcc",
+			"sender":	"Alice",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	18,
+				"channel":	"chat.guild",
+				"policy":	"static",
+				"text":	"You tell your guild 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 14, 27, 0], [14, 19, 19, 0], [19, 28, 27, 0], [28, 34, 18, 0], [34, 46, 27, 0]]
+			}
+		}
+	}, {
+		"case":	"selected",
+		"recipient":	"Bob",
+		"terminalMarkup":	"Alice&+r tells your &+cguild&+r 'translated &+gforest&+r &&+r&&+r <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"gcc",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	18,
+				"channel":	"chat.guild",
+				"policy":	"static",
+				"text":	"Alice tells your guild 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 5, 0, 0], [5, 17, 20, 0], [17, 22, 19, 0], [22, 35, 20, 0], [35, 41, 18, 0], [41, 53, 20, 0]]
+			}
+		}
+	}, {
+		"case":	"reconnect",
+		"recipient":	"Alice",
+		"terminalMarkup":	"&+CYou tell your &+cguild&+C 'SECRET &+gforest&+C &&+C&&+C <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"gcc",
+			"sender":	"Alice",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	18,
+				"channel":	"chat.guild",
+				"policy":	"static",
+				"text":	"You tell your guild 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 14, 27, 0], [14, 19, 19, 0], [19, 28, 27, 0], [28, 34, 18, 0], [34, 46, 27, 0]]
+			}
+		}
+	}, {
+		"case":	"reconnect",
+		"recipient":	"Bob",
+		"terminalMarkup":	"Alice&+r tells your &+cguild&+r 'translated &+gforest&+r &&+r&&+r <tag> 🌲'&n\n",
+		"packet":	{
+			"channel":	"gcc",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	18,
+				"channel":	"chat.guild",
+				"policy":	"static",
+				"text":	"Alice tells your guild 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 5, 0, 0], [5, 17, 20, 0], [17, 22, 19, 0], [22, 35, 20, 0], [35, 41, 18, 0], [41, 53, 20, 0]]
+			}
+		}
+	}, {
+		"case":	"reset",
+		"recipient":	"Alice",
+		"terminalMarkup":	"&+cYou tell your &+cguild&+c '&+CSECRET &+gforest&n && <tag> 🌲&n&+c'\r\n",
+		"packet":	{
+			"channel":	"gcc",
+			"sender":	"Alice",
+			"text":	"SECRET &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	18,
+				"channel":	"chat.guild",
+				"policy":	"preserve",
+				"text":	"You tell your guild 'SECRET forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 21, 19, 0], [21, 28, 27, 0], [28, 34, 18, 0], [34, 45, 0, 0], [45, 46, 19, 0]]
+			}
+		}
+	}, {
+		"case":	"reset",
+		"recipient":	"Bob",
+		"terminalMarkup":	"&+cAlice&n&+c tells your &+cguild&+c '&+Ctranslated &+gforest&n && <tag> 🌲&n&+c'\r\n",
+		"packet":	{
+			"channel":	"gcc",
+			"sender":	"Alice",
+			"text":	"translated &+gforest&n && <tag> 🌲",
+			"presentation":	{
+				"version":	1,
+				"channelId":	18,
+				"channel":	"chat.guild",
+				"policy":	"preserve",
+				"text":	"Alice tells your guild 'translated forest && <tag> 🌲'",
+				"underline":	false,
+				"runs":	[[0, 24, 19, 0], [24, 35, 27, 0], [35, 41, 18, 0], [41, 52, 0, 0], [52, 53, 19, 0]]
+			}
+		}
+	}]

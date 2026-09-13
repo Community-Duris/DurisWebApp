@@ -22,6 +22,7 @@ const {
     reset: vi.fn(),
     openReconnectDialog: vi.fn(),
     addLogEntry: vi.fn(),
+    addChatMessage: vi.fn(),
   },
   storeMudCredentials: vi.fn(),
   clearMudCredentials: vi.fn(),
@@ -40,7 +41,7 @@ class FakeSocket {
   readyState = FakeSocket.OPEN
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event: { code: number; reason: string }) => void) | null = null
   onerror: ((error: unknown) => void) | null = null
   sent: string[] = []
 
@@ -54,7 +55,7 @@ class FakeSocket {
 
   close() {
     this.readyState = 3
-    this.onclose?.()
+    this.onclose?.({ code: 1000, reason: 'test reconnect' })
   }
 }
 
@@ -108,6 +109,7 @@ vi.mock('@/utils/duriswebAuth', () => ({
 }))
 
 import { useMudConnection } from '../useMudConnection'
+import chatFixtures from '../../components/mud/__tests__/fixtures/chat-presentation-v1.json'
 
 let activeWrapper: VueWrapper | null = null
 
@@ -219,5 +221,55 @@ describe('useMudConnection credential lifecycle', () => {
 
     expect(storeMudCredentials).not.toHaveBeenCalled()
     expect(clearMudCredentials).toHaveBeenCalledTimes(1)
+  })
+  it('delivers one presentation snapshot per packet through reconnect and default reset', async () => {
+    const connection = createConnection()
+    await connection.connect()
+    for (const fixture of chatFixtures.filter((entry) => entry.recipient === 'Bob')) {
+      const packet = {
+        type: 'gmcp',
+        package: 'Comm.Channel',
+        data: { ...fixture.packet, timestamp: 1 },
+      }
+      sockets.at(-1)!.onmessage?.({ data: JSON.stringify(packet) })
+      expect(store.addChatMessage).toHaveBeenLastCalledWith(
+        fixture.packet.channel,
+        fixture.packet.sender,
+        fixture.packet.text,
+        undefined,
+        undefined,
+        fixture.packet.presentation,
+      )
+      if (fixture.case === 'selected') {
+        connection.disconnect()
+        await connection.connect()
+      }
+    }
+    expect(store.addChatMessage).toHaveBeenCalledTimes(9)
+    const socket = sockets.at(-1)!
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'gmcp',
+        package: 'Comm.Channel',
+        data: { channel: 'say', sender: {}, text: 'invalid' },
+      }),
+    })
+    expect(store.addChatMessage).toHaveBeenCalledTimes(9)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'gmcp',
+        package: 'Comm.Channel',
+        data: { channel: 'say', sender: 'Bob', text: 'old server' },
+      }),
+    })
+    expect(store.addChatMessage).toHaveBeenCalledTimes(10)
+    expect(store.addChatMessage).toHaveBeenLastCalledWith(
+      'say',
+      'Bob',
+      'old server',
+      undefined,
+      undefined,
+      undefined,
+    )
   })
 })

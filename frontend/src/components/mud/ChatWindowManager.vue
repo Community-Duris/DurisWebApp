@@ -83,6 +83,7 @@ watch(
             timestamp: Date.now(),
             direction: 'sent',
             text: msg.text,
+            presentation: msg.presentation,
             type: 'tell',
           })
         }
@@ -97,6 +98,7 @@ watch(
         timestamp: Date.now(),
         direction: 'received',
         text: msg.text,
+        presentation: msg.presentation,
         type: 'tell',
       })
 
@@ -142,6 +144,7 @@ watch(
             timestamp: Date.now(),
             direction: 'sent',
             text: msg.text,
+            presentation: msg.presentation,
             type: 'ptell',
           })
         }
@@ -156,6 +159,7 @@ watch(
         timestamp: Date.now(),
         direction: 'received',
         text: msg.text,
+        presentation: msg.presentation,
         type: 'ptell',
       })
 
@@ -200,6 +204,7 @@ watch(
             timestamp: Date.now(),
             direction: 'sent',
             text: msg.text,
+            presentation: msg.presentation,
             type: 'gsay',
           })
         }
@@ -212,6 +217,7 @@ watch(
         direction: 'received',
         sender: sender,
         text: msg.text,
+        presentation: msg.presentation,
         type: 'gsay',
       })
 
@@ -254,6 +260,7 @@ watch(
             timestamp: Date.now(),
             direction: 'sent',
             text: msg.text,
+            presentation: msg.presentation,
             type: 'gcc',
           })
         }
@@ -266,6 +273,7 @@ watch(
         direction: 'received',
         sender: sender,
         text: msg.text,
+        presentation: msg.presentation,
         type: 'gcc',
       })
 

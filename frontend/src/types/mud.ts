@@ -1,3 +1,4 @@
+import type { ChatPresentation } from '../utils/chatPresentation.js'
 // MUD Client TypeScript Types
 // Based on WebSocket PRD Protocol Specification
 
@@ -491,6 +492,7 @@ export interface MudGmcpCommChannel {
     channel: string
     sender: string
     text: string
+    presentation?: unknown
     timestamp: number
     /** Racewar alignment for nchat (good, evil, undead, neutral) */
     alignment?: 'good' | 'evil' | 'undead' | 'neutral'
@@ -848,6 +850,7 @@ export interface MudChatMessage {
   timestamp: Date
   channel: string
   sender: string
+  presentation?: ChatPresentation
   text: string
   /** CSS class for trigger highlight */
   highlightClass?: string
