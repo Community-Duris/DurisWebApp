@@ -221,16 +221,16 @@ describe('complete deployment recovery', () => {
     expect(calls).toContain('--retry-max-time 60');
   });
 
-  it('preserves normal application restart propagation in the rendered tunnel unit', () => {
+  it('keeps the rendered tunnel running through application restarts', () => {
     const fixture = createRecoveryFixture('cloudflared');
 
     const tunnel = fs.readFileSync(
       path.join(fixture.output, 'systemd/durisweb-cloudflared.service'),
       'utf8',
     );
-    expect(tunnel).toContain('BindsTo=durisweb-production.service');
-    expect(tunnel).toContain('PartOf=durisweb-production.service');
+    expect(tunnel).not.toMatch(/^(BindsTo|PartOf)=/m);
     expect(tunnel).toContain('After=network-online.target durisweb-production.service');
+    expect(tunnel).toContain('Restart=always');
   });
 
   it('fails immediately when systemd only partially starts the rendered group', () => {

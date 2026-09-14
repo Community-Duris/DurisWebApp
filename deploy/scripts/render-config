@@ -135,9 +135,50 @@ for render_service in "${render_services[@]}"; do
     exit 78
   fi
 done
+if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ] &&
+  [[ ! "${CLOUDFLARED_METRICS_ADDRESS}" =~ ^(127\.0\.0\.1|localhost|\[::1\]):[0-9]+$ ]]; then
+  printf 'CLOUDFLARED_METRICS_ADDRESS must be a loopback host:port.\n' >&2
+  exit 78
+fi
+
+render_public_health=''
+render_ingress_service=''
+render_ingress_service_scope=''
+if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ]; then
+  render_ingress_service='durisweb-cloudflared.service'
+  render_ingress_service_scope=${DEPLOY_SERVICE_SCOPE}
+elif [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
+  render_ingress_service=${NGINX_SERVICE}
+  render_ingress_service_scope='system'
+fi
+if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ] || [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
+  render_public_health=${PUBLIC_HEALTH_URL}
+fi
+
+# A system watchdog runs as root, so it executes a root-owned installed copy
+# instead of a checkout script that the service account can modify.
+WATCHDOG_EXECUTABLE="${BACKEND_ROOT}/../deploy/scripts/durisweb-watchdog"
+if [ "${DEPLOY_SERVICE_SCOPE}" = 'system' ]; then
+  WATCHDOG_EXECUTABLE=/usr/local/sbin/durisweb-watchdog
+fi
+WATCHDOG_INGRESS_SERVICE=${render_ingress_service}
+WATCHDOG_INGRESS_SCOPE=${render_ingress_service_scope}
+WATCHDOG_PUBLIC_HEALTH_URL=${render_public_health}
+WATCHDOG_INGRESS_READY_URL=''
+WATCHDOG_PROXY_SERVICE=''
+if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ]; then
+  WATCHDOG_INGRESS_READY_URL="http://${CLOUDFLARED_METRICS_ADDRESS}/ready"
+  if [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
+    WATCHDOG_PROXY_SERVICE=${NGINX_SERVICE}
+  fi
+fi
 
 render_output_marker="${RENDER_OUTPUT_DIR}/.durisweb-render-output"
-render_variables+=(SERVICE_IDENTITY SERVICE_INSTALL_TARGET SERVICE_REMOVE_IPC)
+render_variables+=(
+  SERVICE_IDENTITY SERVICE_INSTALL_TARGET SERVICE_REMOVE_IPC DEPLOY_SERVICE_SCOPE
+  WATCHDOG_EXECUTABLE WATCHDOG_INGRESS_SERVICE WATCHDOG_INGRESS_SCOPE
+  WATCHDOG_INGRESS_READY_URL WATCHDOG_PROXY_SERVICE WATCHDOG_PUBLIC_HEALTH_URL
+)
 if [[ "${RENDER_OUTPUT_DIR}" != /* ]] ||
   [ "$(realpath -m -- "${RENDER_OUTPUT_DIR}")" != "${RENDER_OUTPUT_DIR}" ]; then
   printf 'Render output must be an absolute path without symlinked components: %s\n' \
@@ -205,6 +246,10 @@ render_template "${render_deploy_root}/templates/systemd/durisweb-production.ser
   "${RENDER_OUTPUT_DIR}/systemd/durisweb-production.service"
 render_template "${render_deploy_root}/templates/systemd/durisweb-redis.service" \
   "${RENDER_OUTPUT_DIR}/systemd/durisweb-redis.service"
+render_template "${render_deploy_root}/templates/systemd/durisweb-watchdog.service" \
+  "${RENDER_OUTPUT_DIR}/systemd/durisweb-watchdog.service"
+render_template "${render_deploy_root}/templates/systemd/durisweb-watchdog.timer" \
+  "${RENDER_OUTPUT_DIR}/systemd/durisweb-watchdog.timer"
 render_template "${render_deploy_root}/templates/redis/redis.conf" \
   "${RENDER_OUTPUT_DIR}/redis/redis.conf"
 
@@ -227,21 +272,8 @@ if [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
 fi
 
 chmod 0600 "${RENDER_OUTPUT_DIR}/redis/redis.conf"
-chmod 0644 "${RENDER_OUTPUT_DIR}"/systemd/*.service
+chmod 0644 "${RENDER_OUTPUT_DIR}"/systemd/*.service "${RENDER_OUTPUT_DIR}"/systemd/*.timer
 
-render_public_health=''
-render_ingress_service=''
-render_ingress_service_scope=''
-if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ]; then
-  render_ingress_service='durisweb-cloudflared.service'
-  render_ingress_service_scope=${DEPLOY_SERVICE_SCOPE}
-elif [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
-  render_ingress_service=${NGINX_SERVICE}
-  render_ingress_service_scope='system'
-fi
-if [ "${DEPLOY_CLOUDFLARED_ENABLED}" = 'true' ] || [ "${DEPLOY_NGINX_ENABLED}" = 'true' ]; then
-  render_public_health=${PUBLIC_HEALTH_URL}
-fi
 {
   printf 'NODE_BIN=%s\n' "${NODE_BIN}"
   printf 'DEPLOY_SERVICE_SCOPE=%s\n' "${DEPLOY_SERVICE_SCOPE}"

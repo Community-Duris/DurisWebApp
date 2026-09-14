@@ -235,7 +235,8 @@ See [ADR 0001](adr/0001-hook-control-ownership-and-state.md) and the
   Express production route at `/health` reports persistent dependency status.
 - Local origin and public apex/`www` health are verified through the configured
   ingress. When Cloudflared is enabled, its dedicated tunnel also exposes a
-  loopback-only readiness endpoint for operator checks.
+  loopback-only readiness endpoint for operator checks and the availability
+  watchdog, which restarts stopped or unready website units.
 - The admin backup service creates local ZIP archives, but its legacy restore
   path is default-closed and is not the production recovery mechanism. Release
   backups and restore rehearsals are operator-managed, protected, and verified

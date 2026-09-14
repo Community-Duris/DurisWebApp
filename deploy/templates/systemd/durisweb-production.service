@@ -3,8 +3,7 @@ Description=DurisWeb production API and static frontend
 Wants=network-online.target @DATABASE_SERVICE@
 Requires=@CACHE_SERVICE@
 After=network-online.target @DATABASE_SERVICE@ @MUD_SERVICE@ @CACHE_SERVICE@
-StartLimitIntervalSec=300
-StartLimitBurst=5
+StartLimitIntervalSec=0
 
 [Service]
 @SERVICE_IDENTITY@
@@ -18,7 +17,7 @@ ExecCondition=@TEST_BIN@ -d @BACKEND_ROOT@/migrations
 ExecCondition=@NODE_BIN@ @BACKEND_ROOT@/dist/scripts/productionPreflight.js --configuration
 ExecStartPre=@NODE_BIN@ @BACKEND_ROOT@/dist/scripts/productionPreflight.js --dependencies
 ExecStart=@NODE_BIN@ @BACKEND_ROOT@/dist/index.js
-Restart=on-failure
+Restart=always
 RestartPreventExitStatus=78
 RestartSec=5s
 KillSignal=SIGTERM

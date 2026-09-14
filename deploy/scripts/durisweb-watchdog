@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# Keeps one rendered DurisWeb deployment available. Each run starts any stopped
+# unit in the group, then restarts the application or ingress only after
+# consecutive failed probes and outside a cooldown, so a single slow response
+# never causes a restart and a persistent fault cannot cause a restart loop.
+# The rendered durisweb-watchdog unit supplies STATE_DIRECTORY and WATCHDOG_*.
+
+# No errexit: one failed probe, systemctl request, or state write must not skip
+# the remaining checks.
+set -uo pipefail
+
+watchdog_failure_limit=3
+watchdog_restart_cooldown_seconds=600
+watchdog_pause_limit_seconds=14400
+watchdog_unit_pattern='^[A-Za-z0-9_.@:-]+\.service$'
+watchdog_backend_pattern='"service":[[:space:]]*"durisweb-backend"'
+watchdog_ok_pattern='"status":[[:space:]]*"ok"'
+watchdog_checks_pattern='"checks":(\{[^}]*\})'
+
+# Writes one journal entry; journald maps the leading <priority> to its level.
+watchdog_log() {
+  printf '<%s>%s\n' "$1" "$2"
+}
+
+# Refuses unusable configuration before any unit is touched.
+watchdog_refuse() {
+  printf '<3>%s\n' "$1" >&2
+  exit 78
+}
+
+if [ "$#" -ne 0 ]; then
+  printf 'Usage: %s (configured through STATE_DIRECTORY and WATCHDOG_* values)\n' "$0" >&2
+  exit 64
+fi
+
+watchdog_state=${STATE_DIRECTORY:-}
+watchdog_scope=${WATCHDOG_SERVICE_SCOPE:-}
+watchdog_application=${WATCHDOG_APPLICATION_SERVICE:-}
+watchdog_cache=${WATCHDOG_CACHE_SERVICE:-}
+watchdog_ingress=${WATCHDOG_INGRESS_SERVICE:-}
+watchdog_ingress_scope=${WATCHDOG_INGRESS_SCOPE:-}
+watchdog_proxy=${WATCHDOG_PROXY_SERVICE:-}
+watchdog_local_health=${WATCHDOG_LOCAL_HEALTH_URL:-}
+watchdog_public_health=${WATCHDOG_PUBLIC_HEALTH_URL:-}
+watchdog_ingress_ready=${WATCHDOG_INGRESS_READY_URL:-}
+
+if [[ "${watchdog_state}" != /* ]] || [ ! -d "${watchdog_state}" ] || [ -L "${watchdog_state}" ]; then
+  watchdog_refuse 'STATE_DIRECTORY must name an existing absolute, non-symlink directory.'
+fi
+case "${watchdog_scope}" in
+  user|system) ;;
+  *) watchdog_refuse 'WATCHDOG_SERVICE_SCOPE must be user or system.' ;;
+esac
+if [[ ! "${watchdog_application}" =~ ${watchdog_unit_pattern} ]] ||
+  [[ ! "${watchdog_cache}" =~ ${watchdog_unit_pattern} ]]; then
+  watchdog_refuse 'Application and cache units must be systemd service names.'
+fi
+for watchdog_optional_unit in "${watchdog_ingress}" "${watchdog_proxy}"; do
+  if [ -n "${watchdog_optional_unit}" ] &&
+    [[ ! "${watchdog_optional_unit}" =~ ${watchdog_unit_pattern} ]]; then
+    watchdog_refuse 'Ingress and proxy units must be systemd service names.'
+  fi
+done
+case "${watchdog_ingress:+set}:${watchdog_ingress_scope}" in
+  :|set:user|set:system) ;;
+  *) watchdog_refuse 'WATCHDOG_INGRESS_SCOPE must be user or system exactly when an ingress unit is set.' ;;
+esac
+if [[ ! "${watchdog_local_health}" =~ ^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?/health$ ]]; then
+  watchdog_refuse 'WATCHDOG_LOCAL_HEALTH_URL must be an exact loopback /health URL.'
+fi
+if [ -n "${watchdog_public_health}" ] &&
+  { [ -z "${watchdog_ingress}" ] ||
+    [[ ! "${watchdog_public_health}" =~ ^https://[^/?#[:space:]]+/health$ ]] ||
+    [[ "${watchdog_public_health}" == *@* ]]; }; then
+  watchdog_refuse 'WATCHDOG_PUBLIC_HEALTH_URL must be an exact HTTPS /health URL for a configured ingress unit.'
+fi
+if [ -n "${watchdog_ingress_ready}" ] &&
+  { [ -z "${watchdog_ingress}" ] ||
+    [[ ! "${watchdog_ingress_ready}" =~ ^http://(127\.0\.0\.1|localhost|\[::1\]):[0-9]+/ready$ ]]; }; then
+  watchdog_refuse 'WATCHDOG_INGRESS_READY_URL must be a loopback /ready URL for a configured ingress unit.'
+fi
+if ! command -v systemctl >/dev/null || ! command -v curl >/dev/null; then
+  printf '<3>The watchdog requires systemctl and curl on PATH.\n' >&2
+  exit 69
+fi
+
+# Reads one counter or timestamp, treating missing or corrupt state as zero.
+watchdog_read() {
+  local watchdog_value
+  watchdog_value=$(cat -- "${watchdog_state}/$1" 2>/dev/null) || watchdog_value=0
+  if [[ ! "${watchdog_value}" =~ ^(0|[1-9][0-9]{0,17})$ ]]; then
+    watchdog_value=0
+  fi
+  printf '%s' "${watchdog_value}"
+}
+
+# Replaces one state value atomically.
+watchdog_write() {
+  printf '%s\n' "$2" >"${watchdog_state}/$1.tmp" &&
+    mv -f -- "${watchdog_state}/$1.tmp" "${watchdog_state}/$1"
+}
+
+# Runs systemctl against the manager that owns a unit.
+watchdog_systemctl() {
+  local watchdog_manager=$1
+  shift
+  systemctl "--${watchdog_manager}" "$@"
+}
+
+# Succeeds when a URL answers with a DurisWeb health document, even a degraded one.
+watchdog_backend_answers() {
+  watchdog_body=$(curl --silent --show-error --connect-timeout 5 --max-time 15 "$1" 2>/dev/null) ||
+    return 1
+  [[ "${watchdog_body}" =~ ${watchdog_backend_pattern} ]]
+}
+
+# Clears a probe's failure count and records the recovery once.
+watchdog_recovered() {
+  if [ "$(watchdog_read "$1.failures")" != 0 ]; then
+    watchdog_write "$1.failures" 0
+    watchdog_log 5 "$2"
+  fi
+}
+
+# Counts a failed probe and restarts its unit at the limit when outside the cooldown.
+watchdog_restart_after_failures() {
+  local watchdog_key=$1
+  local watchdog_target=$2
+  local watchdog_target_manager=$3
+  local watchdog_reason=$4
+  local watchdog_failures
+  local watchdog_since
+  watchdog_failures=$(($(watchdog_read "${watchdog_key}.failures") + 1))
+  watchdog_write "${watchdog_key}.failures" "${watchdog_failures}"
+  if ((watchdog_failures < watchdog_failure_limit)); then
+    watchdog_log 4 "${watchdog_reason} (${watchdog_failures}/${watchdog_failure_limit})."
+    return
+  fi
+  watchdog_since=$((watchdog_now - $(watchdog_read "${watchdog_target}.restarted")))
+  if ((watchdog_since >= 0 && watchdog_since < watchdog_restart_cooldown_seconds)); then
+    watchdog_log 3 "${watchdog_reason}; ${watchdog_target} was restarted ${watchdog_since}s ago, so waiting for the cooldown."
+    return
+  fi
+  watchdog_log 3 "${watchdog_reason} for ${watchdog_failures} consecutive checks; restarting ${watchdog_target}."
+  if watchdog_systemctl "${watchdog_target_manager}" restart --no-block "${watchdog_target}"; then
+    watchdog_write "${watchdog_target}.restarted" "${watchdog_now}"
+    watchdog_write "${watchdog_key}.failures" 0
+  else
+    watchdog_log 3 "Could not request a restart of ${watchdog_target}."
+  fi
+}
+
+watchdog_now=$(date +%s)
+watchdog_pause="${watchdog_state}/pause"
+if [ -e "${watchdog_pause}" ]; then
+  watchdog_pause_mtime=$(stat -c '%Y' -- "${watchdog_pause}" 2>/dev/null) || watchdog_pause_mtime=0
+  if [[ ! "${watchdog_pause_mtime}" =~ ^[0-9]+$ ]]; then
+    watchdog_pause_mtime=0
+  fi
+  watchdog_pause_age=$((watchdog_now - watchdog_pause_mtime))
+  if ((watchdog_pause_age >= 0 && watchdog_pause_age < watchdog_pause_limit_seconds)); then
+    watchdog_log 5 "Paused by ${watchdog_pause} ${watchdog_pause_age}s ago; taking no action."
+    exit 0
+  fi
+  watchdog_log 4 "Ignoring the pause in ${watchdog_pause} because it is ${watchdog_pause_age}s old."
+fi
+
+watchdog_units=("${watchdog_cache}" "${watchdog_application}")
+watchdog_managers=("${watchdog_scope}" "${watchdog_scope}")
+if [ -n "${watchdog_proxy}" ]; then
+  watchdog_units+=("${watchdog_proxy}")
+  watchdog_managers+=(system)
+fi
+if [ -n "${watchdog_ingress}" ]; then
+  watchdog_units+=("${watchdog_ingress}")
+  watchdog_managers+=("${watchdog_ingress_scope}")
+fi
+
+watchdog_healthy=true
+declare -A watchdog_active=()
+for watchdog_index in "${!watchdog_units[@]}"; do
+  watchdog_unit=${watchdog_units[${watchdog_index}]}
+  watchdog_manager=${watchdog_managers[${watchdog_index}]}
+  watchdog_unit_state=$(watchdog_systemctl "${watchdog_manager}" show "${watchdog_unit}" \
+    --property=ActiveState --value 2>/dev/null) || watchdog_unit_state=''
+  case "${watchdog_unit_state}" in
+    active|reloading|refreshing)
+      watchdog_active["${watchdog_unit}"]=true
+      ;;
+    activating|deactivating)
+      watchdog_healthy=false
+      watchdog_log 4 "${watchdog_unit} is ${watchdog_unit_state}; checking it again next run."
+      ;;
+    *)
+      # Restart= cannot recover a clean exit it treats as success, a stop
+      # propagated from a dependency, or an exhausted start limit.
+      watchdog_healthy=false
+      watchdog_log 3 "${watchdog_unit} is ${watchdog_unit_state:-unknown}; starting it."
+      watchdog_systemctl "${watchdog_manager}" reset-failed "${watchdog_unit}" >/dev/null 2>&1
+      if ! watchdog_systemctl "${watchdog_manager}" start --no-block "${watchdog_unit}"; then
+        watchdog_log 3 "Could not request a start of ${watchdog_unit}."
+      fi
+      ;;
+  esac
+done
+
+watchdog_body=''
+watchdog_application_answers=false
+if [ -n "${watchdog_active["${watchdog_application}"]:-}" ]; then
+  if watchdog_backend_answers "${watchdog_local_health}"; then
+    watchdog_application_answers=true
+    watchdog_recovered local-health "${watchdog_local_health} answers again."
+    if [[ ! "${watchdog_body}" =~ ${watchdog_ok_pattern} ]]; then
+      watchdog_healthy=false
+      watchdog_checks=unknown
+      if [[ "${watchdog_body}" =~ ${watchdog_checks_pattern} ]]; then
+        watchdog_checks=${BASH_REMATCH[1]}
+      fi
+      watchdog_log 4 "${watchdog_local_health} reports degraded dependencies: ${watchdog_checks}."
+    fi
+  else
+    watchdog_healthy=false
+    watchdog_restart_after_failures local-health "${watchdog_application}" "${watchdog_scope}" \
+      "${watchdog_local_health} did not answer with a DurisWeb health document"
+  fi
+fi
+
+watchdog_ingress_ready_ok=true
+if [ -n "${watchdog_ingress_ready}" ] && [ -n "${watchdog_active["${watchdog_ingress}"]:-}" ]; then
+  if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 \
+    "${watchdog_ingress_ready}" >/dev/null 2>&1; then
+    watchdog_recovered ingress-ready "${watchdog_ingress_ready} reports ready connections again."
+  else
+    watchdog_ingress_ready_ok=false
+    watchdog_healthy=false
+    watchdog_restart_after_failures ingress-ready "${watchdog_ingress}" "${watchdog_ingress_scope}" \
+      "${watchdog_ingress_ready} reports no ready connections"
+  fi
+fi
+
+if [ -n "${watchdog_public_health}" ] && [ "${watchdog_application_answers}" = true ] &&
+  [ "${watchdog_ingress_ready_ok}" = true ] &&
+  [ -n "${watchdog_active["${watchdog_ingress}"]:-}" ]; then
+  if watchdog_backend_answers "${watchdog_public_health}"; then
+    watchdog_recovered public-health "${watchdog_public_health} answers again."
+  else
+    watchdog_healthy=false
+    watchdog_restart_after_failures public-health "${watchdog_ingress}" "${watchdog_ingress_scope}" \
+      "${watchdog_public_health} did not answer while the application answers locally"
+  fi
+fi
+
+if [ "${watchdog_healthy}" = true ]; then
+  exit 0
+fi
+exit 1

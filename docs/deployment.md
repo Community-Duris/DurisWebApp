@@ -64,7 +64,9 @@ and neither preflight nor `/health` proves that a feature query is semantically
 correct. They do not replace
 the test suite or the release-specific acceptance checks below. The rendered
 unit runs configuration as an `ExecCondition`; configuration refusal status 78
-leaves the unit skipped instead of entering a restart loop.
+leaves the unit skipped instead of entering a restart loop. The availability
+watchdog retries that start once per minute, so the site returns without another
+operator step once the configuration is corrected.
 
 ### Publish wiki reference data
 
@@ -203,6 +205,7 @@ deploy/scripts/render-config /absolute/operator/path/deployment.env
 The required `RENDER_OUTPUT_DIR` receives:
 
 - systemd units for the application and private Redis cache;
+- the availability watchdog service and its one-minute timer;
 - a Redis base configuration without an embedded password;
 - the Cloudflare unit when its group is enabled;
 - bootstrap and TLS nginx configurations when their group is enabled;
@@ -257,7 +260,8 @@ not remove or rotate it out from underneath systemd. Use this order:
 3. Verify every rendered unit before linking it:
 
    ```bash
-   systemd-analyze --user verify /absolute/render/output/systemd/*.service
+   systemd-analyze --user verify /absolute/render/output/systemd/*.service \
+     /absolute/render/output/systemd/*.timer
    ```
 
 4. Link the exact enabled-group units from the render directory. `--force` is
@@ -268,6 +272,8 @@ not remove or rotate it out from underneath systemd. Use this order:
    systemctl --user link --force /absolute/render/output/systemd/durisweb-redis.service
    systemctl --user link --force /absolute/render/output/systemd/durisweb-production.service
    systemctl --user link --force /absolute/render/output/systemd/durisweb-cloudflared.service
+   systemctl --user link --force /absolute/render/output/systemd/durisweb-watchdog.service
+   systemctl --user link --force /absolute/render/output/systemd/durisweb-watchdog.timer
    systemctl --user daemon-reload
    ```
 
@@ -277,8 +283,8 @@ not remove or rotate it out from underneath systemd. Use this order:
    assumed to restart or preserve a service without evidence.
 
 5. Enable units only after their dependencies, preflights, and local health have
-   passed. Keep old unit definitions in the protected release snapshot rather
-   than in the checkout.
+   passed, and enable `durisweb-watchdog.timer` last. Keep old unit definitions
+   in the protected release snapshot rather than in the checkout.
 
 Manual invocations of an account-local Redis binary or `redis-cli` may require
 the same `REDIS_LIBRARY_PATH` rendered into the cache unit. A dynamic-loader
@@ -297,6 +303,52 @@ group, stop it completely, start the new group, and re-run acceptance and the
 bridge soak. Switching managers is a coordinated application/cache/tunnel
 restart, not a database or MUD restart.
 
+The system-scope watchdog runs as root because only the system manager can start
+system units. It therefore executes a root-owned copy of the script rather than
+the checkout, which the service account can modify. Install that copy with the
+units, and reinstall it whenever the script changes:
+
+```bash
+install -o root -g root -m 0755 deploy/scripts/durisweb-watchdog /usr/local/sbin/durisweb-watchdog
+```
+
+## Keep the site available
+
+Every long-running unit restarts after any exit except configuration refusal
+(status 78), with no start rate limit, so repeated dependency failures cannot
+park it permanently. This matters most for the tunnel: cloudflared can exit 0
+after losing every edge connection, which `Restart=on-failure` treats as a
+deliberate stop. The tunnel is ordered after the application but not bound to
+it, because systemd stops a bound unit when the application restarts after a
+failure and never starts it again.
+
+`durisweb-watchdog.timer` runs `durisweb-watchdog.service` every minute. Each
+run:
+
+- starts the cache, application, fronting Nginx, or tunnel unit when it is
+  inactive or failed, whatever stopped it;
+- restarts the application after three consecutive checks in which the local
+  `/health` route returns no DurisWeb health document; a degraded document is
+  logged but is not a reason to restart;
+- restarts the tunnel after three consecutive failed readiness checks, or after
+  three failed public `/health` checks while the application answers locally;
+- restarts a given unit at most once every ten minutes.
+
+A run that finds a problem exits nonzero, so `systemctl status` shows the most
+recent finding and `journalctl -u durisweb-watchdog.service` (or
+`journalctl --user-unit` for user services) records every action. Start the
+service manually to check immediately.
+
+Before deliberately stopping any unit, pause the watchdog by creating a `pause`
+file in its state directory: `/var/lib/durisweb-watchdog` for system services or
+`~/.local/state/durisweb-watchdog` for user services. A pause is honored for four
+hours, so a forgotten pause cannot keep the site offline indefinitely. Remove it
+once acceptance passes, and do not stop or disable the timer instead.
+
+The watchdog cannot report a host that is itself offline. Pair it with an
+off-host monitor of the public health URL and the Cloudflare tunnel health
+notification.
+
 ## Cutover sequence
 
 For a visitor-facing maintenance reason that survives an offline origin/tunnel,
@@ -305,19 +357,20 @@ before the window. Its operator switch and frontend popup are separate from
 service recovery; committing the implementation does not activate either.
 
 Inspect reverse dependencies before restarting any database or Redis service.
-The maintained application unit `Requires=` its private cache. The maintained
-tunnel unit `BindsTo=` and is `PartOf=` the application, so a cache restart can
-stop the app/tunnel and a deliberate app restart should cycle its tunnel. A
-shared MUD Redis or database can have separate hard dependencies that make its
-restart player-visible.
+The maintained application unit `Requires=` its private cache, so a cache
+restart also restarts the application. The tunnel is not bound to either: it
+stays connected and returns gateway errors until the application answers
+again. A shared MUD Redis or database can have separate hard dependencies that
+make its restart player-visible.
 
 1. Declare any required maintenance window and record connected-player impact.
-   Capture the app, cache, tunnel, database, and MUD PIDs, active timestamps, and
-   restart counters.
+   Pause the availability watchdog before stopping anything. Capture the app,
+   cache, tunnel, database, and MUD PIDs, active timestamps, and restart
+   counters.
 2. Pass the clone rehearsal, final live migration gate, compiled preflights, and
    rendered-unit verification before stopping healthy processes.
 3. If the private cache configuration changed, restart the cache first and
-   expect the app/tunnel dependency chain to stop. Verify authenticated `PONG`.
+   expect the application to restart with it. Verify authenticated `PONG`.
 4. Switch the complete staged backend/frontend artifacts. Do not expose a
    partial frontend build.
 5. Recover the complete rendered group and require acceptance before ending
@@ -339,7 +392,8 @@ restart player-visible.
    Compare their PIDs and active timestamps with the pre-cutover record.
 7. Enable the validated units and run the acceptance matrix. Unexpected
    `NRestarts`, dependency restarts, or a mismatched served asset stop the
-   release and trigger rollback analysis.
+   release and trigger rollback analysis. Remove the watchdog pause once
+   acceptance passes.
 
 ## Acceptance and rollback
 

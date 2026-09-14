@@ -1,18 +1,19 @@
 [Unit]
 Description=Cloudflare Tunnel for DurisWeb production website
 Wants=network-online.target
-BindsTo=@APPLICATION_SERVICE@
-PartOf=@APPLICATION_SERVICE@
+# Ordered after, but not bound to, the application: systemd stops a bound unit
+# when the application restarts after a failure and never starts it again.
 After=network-online.target @APPLICATION_SERVICE@
-StartLimitIntervalSec=300
-StartLimitBurst=5
+StartLimitIntervalSec=0
 
 [Service]
 @SERVICE_IDENTITY@
 Type=simple
 EnvironmentFile=@DEPLOYMENT_ENV_FILE@
 ExecStart=@CLOUDFLARED_LAUNCHER@
-Restart=on-failure
+# cloudflared can exit 0 after losing every edge connection, so restart after
+# any exit except the launcher's configuration refusal.
+Restart=always
 RestartSec=5s
 RestartPreventExitStatus=78
 KillSignal=SIGTERM

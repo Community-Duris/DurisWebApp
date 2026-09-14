@@ -8,7 +8,7 @@ ingress—not only from a clone or staging environment.
 An explicit production burn-in authorizes recovery-safe source repairs, the exact reviewed forward
 migration set that passes the safeguards below, replacement of this application's generated
 artifacts, and a controlled cycle of the positively identified DurisWeb application unit and its
-bound tunnel, plus the dedicated test-account session lifecycle defined below. It does not authorize
+tunnel, plus the dedicated test-account session lifecycle defined below. It does not authorize
 down migrations, ledger edits, manual schema changes, database restores, unsafe MUD-owned-table
 operations, credential/configuration changes, or restarts of the database, Redis, MUD, or unrelated
 ingress services. Obtain separate explicit authority for any of those actions.
@@ -113,9 +113,11 @@ while the MUD remains up, do not infer permission to stop the MUD.
 After the isolated candidate, test-schema migration, and clone rehearsal all pass:
 
 1. Compare live migration status with the rehearsed names and hashes and declare the
-   maintenance/player-impact boundary. Stop the exact application unit through its actual service
-   manager and account for the bound tunnel. Do not stop the database, cache, or MUD. Wait until the
-   app PID and owned listener are gone, and verify out-of-scope dependency PIDs did not change.
+   maintenance/player-impact boundary. Pause the availability watchdog described in
+   `docs/deployment.md`, then stop the exact application unit through its actual service manager;
+   the tunnel is not bound to it and keeps running. Do not stop the database, cache, or MUD. Wait
+   until the app PID and owned listener are gone, and verify out-of-scope dependency PIDs did not
+   change.
 2. Reconfirm that live source/lockfile hashes equal the qualified candidate. Install both live
    packages from their frozen lockfiles with dev dependencies explicitly included, using the
    recovery plan if dependency installation fails.
@@ -153,7 +155,7 @@ After the isolated candidate, test-schema migration, and clone rehearsal all pas
    ledger, restore data, or work around a schema refusal.
 
 Before a live migration runs, a stopped-state failure restores dependency/artifact state and starts
-the known-good application and bound tunnel before extended diagnosis. After a migration starts,
+the known-good application and its tunnel before extended diagnosis. After a migration starts,
 never blindly restore old artifacts or the database: inspect actual schema/ledger state, use only an
 already-proven schema-compatible application, and choose a new forward repair or separately
 authorized database recovery. A migration already entered in the production ledger is immutable;
@@ -162,10 +164,10 @@ and the entire burn-in.
 
 ## Start, acceptance, and soak
 
-Start the exact application unit and its configured bound tunnel through their actual service
-manager/dependency graph. Its configuration and dependency preflights must execute normally; do not
-bypass `ExecCondition` or `ExecStartPre`. If starting the application does not pull the bound tunnel
-back in, start that exact tunnel explicitly; do the same on a known-good rollback path.
+Start the exact application unit through its actual service manager/dependency graph and confirm
+its configured tunnel is running. Its configuration and dependency preflights must execute normally;
+do not bypass `ExecCondition` or `ExecStartPre`. Start that exact tunnel explicitly if it is not
+running; do the same on a known-good rollback path. Remove the watchdog pause once acceptance passes.
 Allow bounded listener startup retries, then apply the complete acceptance matrix in
 `docs/deployment.md` against the configured local and public endpoints. At minimum verify:
 
@@ -209,6 +211,6 @@ the last acceptance action, sampling at intervals no longer than 30 seconds. Req
 restart-count changes, out-of-scope PID/timestamp changes, asset identity drift, unhealthy samples,
 or new log findings throughout. Any failure restarts the repair loop; a restart that merely returns
 to green is not a clean pass. If a finding cannot be repaired safely, use the schema-compatibility
-decision above before restoring known-good dependencies/artifacts, restart the application and bound
+decision above before restoring known-good dependencies/artifacts, restart the application and its
 tunnel through the same service graph, verify recovery with the acceptance checks, and report the
 production burn-in incomplete.

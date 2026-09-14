@@ -1,0 +1,38 @@
+[Unit]
+Description=DurisWeb availability watchdog
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# No User=: only the owning manager can start system units, so system scope runs
+# a root-owned installed copy of the script instead of the checkout.
+Type=oneshot
+Environment=WATCHDOG_SERVICE_SCOPE=@DEPLOY_SERVICE_SCOPE@
+Environment=WATCHDOG_APPLICATION_SERVICE=@APPLICATION_SERVICE@
+Environment=WATCHDOG_CACHE_SERVICE=@CACHE_SERVICE@
+Environment=WATCHDOG_INGRESS_SERVICE=@WATCHDOG_INGRESS_SERVICE@
+Environment=WATCHDOG_INGRESS_SCOPE=@WATCHDOG_INGRESS_SCOPE@
+Environment=WATCHDOG_INGRESS_READY_URL=@WATCHDOG_INGRESS_READY_URL@
+Environment=WATCHDOG_PROXY_SERVICE=@WATCHDOG_PROXY_SERVICE@
+Environment=WATCHDOG_LOCAL_HEALTH_URL=@LOCAL_HEALTH_URL@
+Environment=WATCHDOG_PUBLIC_HEALTH_URL=@WATCHDOG_PUBLIC_HEALTH_URL@
+ExecStart="@WATCHDOG_EXECUTABLE@"
+StateDirectory=durisweb-watchdog
+StateDirectoryMode=0700
+TimeoutStartSec=3min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=durisweb-watchdog

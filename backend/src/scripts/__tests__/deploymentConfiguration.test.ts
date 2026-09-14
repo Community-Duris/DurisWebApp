@@ -120,6 +120,8 @@ printf '%s\\n' "$*"
       'systemd/durisweb-production.service',
       'systemd/durisweb-redis.service',
       'systemd/durisweb-cloudflared.service',
+      'systemd/durisweb-watchdog.service',
+      'systemd/durisweb-watchdog.timer',
       'deployment-selection.env',
       'redis/redis.conf',
       'nginx/bootstrap.conf',
@@ -166,6 +168,13 @@ printf '%s\\n' "$*"
     expect(fs.readFileSync(path.join(outputPath, 'deployment-selection.env'), 'utf8')).toContain(
       'INGRESS_SERVICE_SCOPE=\n',
     );
+    const watchdog = fs.readFileSync(
+      path.join(outputPath, 'systemd/durisweb-watchdog.service'),
+      'utf8',
+    );
+    expect(watchdog).toContain('Environment=WATCHDOG_INGRESS_SERVICE=\n');
+    expect(watchdog).toContain('Environment=WATCHDOG_INGRESS_READY_URL=\n');
+    expect(watchdog).toContain('Environment=WATCHDOG_PUBLIC_HEALTH_URL=\n');
     expect(fs.existsSync(path.join(outputPath, 'nginx'))).toBe(false);
   });
 
@@ -230,6 +239,115 @@ printf '%s\\n' "$*"
     const selection = fs.readFileSync(path.join(outputPath, 'deployment-selection.env'), 'utf8');
     expect(selection).toContain('DEPLOY_SERVICE_SCOPE=system\n');
     expect(selection).toContain('INGRESS_SERVICE_SCOPE=system\n');
+    const watchdog = fs.readFileSync(
+      path.join(outputPath, 'systemd/durisweb-watchdog.service'),
+      'utf8',
+    );
+    expect(watchdog).toContain('ExecStart="/usr/local/sbin/durisweb-watchdog"\n');
+    expect(watchdog).toContain('Environment=WATCHDOG_SERVICE_SCOPE=system\n');
+    expect(watchdog).toContain('Environment=WATCHDOG_INGRESS_SCOPE=system\n');
+    expect(watchdog).not.toMatch(/^User=/m);
+  });
+
+  it('restarts every long-running unit after any exit without a start rate limit', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
+    temporaryDirectories.push(temporaryRoot);
+    const outputPath = path.join(temporaryRoot, 'rendered');
+    fs.mkdirSync(outputPath);
+    const inputPath = writeDeploymentInput(temporaryRoot, outputPath, true);
+
+    const result = spawnSync(
+      'bash',
+      [path.join(PROJECT_ROOT, 'deploy/scripts/render-config'), inputPath],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    for (const name of ['production', 'redis', 'cloudflared']) {
+      const unit = fs.readFileSync(
+        path.join(outputPath, `systemd/durisweb-${name}.service`),
+        'utf8',
+      );
+      expect(unit).toContain('Restart=always\n');
+      expect(unit).toContain('StartLimitIntervalSec=0\n');
+      expect(unit).not.toContain('StartLimitBurst=');
+    }
+    const tunnel = fs.readFileSync(
+      path.join(outputPath, 'systemd/durisweb-cloudflared.service'),
+      'utf8',
+    );
+    expect(tunnel).not.toMatch(/^(BindsTo|PartOf)=/m);
+    expect(tunnel).toContain('RestartPreventExitStatus=78\n');
+  });
+
+  it('renders a one-minute availability watchdog for the selected group', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
+    temporaryDirectories.push(temporaryRoot);
+    const outputPath = path.join(temporaryRoot, 'rendered');
+    fs.mkdirSync(outputPath);
+    const inputPath = writeDeploymentInput(temporaryRoot, outputPath, true);
+
+    const result = spawnSync(
+      'bash',
+      [path.join(PROJECT_ROOT, 'deploy/scripts/render-config'), inputPath],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    const watchdog = fs.readFileSync(
+      path.join(outputPath, 'systemd/durisweb-watchdog.service'),
+      'utf8',
+    );
+    expect(watchdog).toContain(
+      'ExecStart="/srv/portable/durisweb/backend/../deploy/scripts/durisweb-watchdog"\n',
+    );
+    expect(watchdog).toContain('Environment=WATCHDOG_SERVICE_SCOPE=user\n');
+    expect(watchdog).toContain(
+      'Environment=WATCHDOG_APPLICATION_SERVICE=durisweb-production.service\n',
+    );
+    expect(watchdog).toContain(
+      'Environment=WATCHDOG_INGRESS_SERVICE=durisweb-cloudflared.service\n',
+    );
+    expect(watchdog).toContain(
+      'Environment=WATCHDOG_INGRESS_READY_URL=http://127.0.0.1:20243/ready\n',
+    );
+    expect(watchdog).toContain('Environment=WATCHDOG_PROXY_SERVICE=nginx.service\n');
+    expect(watchdog).toContain(
+      'Environment=WATCHDOG_PUBLIC_HEALTH_URL=https://portable.invalid/health\n',
+    );
+    expect(watchdog).toContain('StateDirectory=durisweb-watchdog\n');
+    expect(watchdog).not.toMatch(/^User=/m);
+    const timer = fs.readFileSync(path.join(outputPath, 'systemd/durisweb-watchdog.timer'), 'utf8');
+    expect(timer).toContain('OnUnitActiveSec=1min\n');
+    expect(timer).toContain('WantedBy=timers.target\n');
+  });
+
+  it('requires a loopback cloudflared metrics address before rendering', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'durisweb-deploy-'));
+    temporaryDirectories.push(temporaryRoot);
+    const outputPath = path.join(temporaryRoot, 'rendered');
+    fs.mkdirSync(outputPath);
+    const inputPath = writeDeploymentInput(temporaryRoot, outputPath, true);
+    fs.writeFileSync(
+      inputPath,
+      fs
+        .readFileSync(inputPath, 'utf8')
+        .replace(
+          'CLOUDFLARED_METRICS_ADDRESS=127.0.0.1:20243',
+          'CLOUDFLARED_METRICS_ADDRESS=0.0.0.0:20243',
+        ),
+      { mode: 0o600 },
+    );
+
+    const result = spawnSync(
+      'bash',
+      [path.join(PROJECT_ROOT, 'deploy/scripts/render-config'), inputPath],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(78);
+    expect(result.stderr).toContain('CLOUDFLARED_METRICS_ADDRESS must be a loopback host:port');
+    expect(fs.readdirSync(outputPath)).toEqual([]);
   });
 
   it.each(['root', '', '0', 'missing-deploy-test-user', 'nobody;id'])(
