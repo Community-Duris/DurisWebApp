@@ -69,7 +69,7 @@
     "jsdom": "^26.1.0",
     "jsonwebtoken": "^9.0.3",
     "knex": "^3.3.0",
-    "multer": "^2.3.0",
+    "multer": "^2.4.0",
     "mysql2": "^3.24.4",
     "node-cron": "^4.6.0",
     "node-pty": "^1.1.0",
